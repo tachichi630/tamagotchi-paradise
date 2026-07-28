@@ -1,92 +1,18 @@
 import React, { useState, useEffect } from "react";
 import { pixelTabStyle, pixelBadgeStyle, pixelClip, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
+import { supabase } from "./supabaseClient";
 
-// 每個活動：名字、圖片、簡介、開始時間、結束時間。
+// 活動跟官方情報現在都存在同一張 Supabase 的 events 表裡，用 type 欄位（'event' / 'news'）區分，
+// 讀出來後這個檔案會照原本的欄位習慣（name/startDate/endDate 給活動，title/publishedAt/content 給情報）
+// 分別組成兩份陣列，所以下面畫面的部分完全不用改。
+//
 // startDate / endDate 都是「可選」欄位 —— 某些活動（例如常態開放的活動）可以不設定時間，
 // 一律留空即可，畫面會自動顯示為「長期開放」而不會出現倒數。
 //
-// intro（簡介）支援兩種寫法：
+// intro（簡介）支援兩種寫法，存在資料庫的 intro 這個 jsonb 欄位裡：
 //   1. 純文字字串（跟之前一樣）
 //   2. 陣列，混合「純文字片段」與 { type: "link", text, url } 連結片段，
 //      用來在內文中插入可點擊的連結（例如活動規則說明頁）
-const EVENTS = [
-  {
-    id: "e1",
-    name: "夏日海灘祭",
-    image: null,
-    intro: "限時開放海灘裝飾商店，並提升西瓜飯糰掉落機率。",
-    startDate: "2026-07-01T00:00:00",
-    endDate: "2026-07-15T23:59:59",
-  },
-  {
-    id: "e2",
-    name: "行星探索週",
-    image: null,
-    intro: [
-      "登入即可獲得探索點數，累積點數可兌換限定裝飾，詳細規則請見",
-      { type: "link", text: "活動規則說明", url: "https://example.com/event-rules" },
-      "。",
-    ],
-    startDate: "2026-07-20T00:00:00",
-    endDate: "2026-08-05T23:59:59",
-  },
-  {
-    id: "e3",
-    name: "星空觀測祭",
-    image: null,
-    intro: "夜晚限定小遊戲，完成任務可獲得稀有零食兌換碼。",
-    startDate: "2026-08-10T00:00:00",
-    endDate: "2026-08-20T23:59:59",
-  },
-  {
-    id: "e4",
-    name: "週年紀念活動",
-    image: null,
-    intro: "網站週年慶，開放限定紀念角色與周邊兌換碼。",
-    startDate: "2026-09-01T00:00:00",
-    endDate: "2026-09-10T23:59:59",
-  },
-  {
-    id: "e5",
-    name: "每日登入獎勵",
-    image: null,
-    // 不設定 startDate / endDate → 視為長期開放，不顯示倒數
-    intro: [
-      "每天登入即可領取獎勵，詳情見",
-      { type: "link", text: "獎勵一覽表", url: "https://example.com/daily-rewards" },
-      "。",
-    ],
-  },
-];
-
-// 官方情報：跟「活動」不一樣，這裡放的是沒有起訖時間的官方消息／公告
-// （例如新機型發售、免費官方桌布、韌體更新公告），單純照發布時間排序，
-// 不需要倒數、也不會有「進行中／已結束」這種狀態。
-// 跟活動一覽共用同一頁，只是切換上面的「活動／官方情報」模式來決定顯示哪一組資料，
-// 這樣使用者不用記兩個不同的入口，之後也不用多一個頂層導覽項。
-const NEWS = [
-  {
-    id: "n1",
-    title: "新機型「Tamagotchi Paradise Pastel」發售公告",
-    image: null,
-    content: "官方公布新色機型將於下個月發售，這次新增了粉彩配色系列。",
-    publishedAt: "2026-07-26T10:00:00",
-  },
-  {
-    id: "n2",
-    title: "免費官方桌布釋出",
-    image: null,
-    content: "官方釋出本季角色主題桌布，提供手機與電腦版本下載。",
-    publishedAt: "2026-07-22T09:00:00",
-  },
-  {
-    id: "n3",
-    title: "App 版本更新公告",
-    image: null,
-    content: "修正若干已知問題，並優化商店載入速度。",
-    publishedAt: "2026-07-18T14:00:00",
-  },
-];
 
 const STATUS_LABEL = {
   upcoming: "即將開始",
@@ -268,13 +194,60 @@ export default function EventsPrototype() {
   const [now, setNow] = useState(Date.now());
   const [filter, setFilter] = useState("all");
   const [openImageItem, setOpenImageItem] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [news, setNews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  const withStatus = EVENTS.map((e) => ({ ...e, status: getStatus(e, now) }));
+  useEffect(() => {
+    supabase
+      .from("events")
+      .select("*")
+      .then(({ data, error }) => {
+        if (error) {
+          setLoadError(error.message);
+          setLoading(false);
+          return;
+        }
+        const rows = data || [];
+        setEvents(
+          rows
+            .filter((r) => r.type === "event")
+            .map((r) => ({ id: r.id, name: r.title, image: r.image_url, intro: r.intro, startDate: r.start_date, endDate: r.end_date }))
+        );
+        setNews(
+          rows
+            .filter((r) => r.type === "news")
+            .map((r) => ({ id: r.id, title: r.title, image: r.image_url, content: r.intro, publishedAt: r.published_at }))
+        );
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>活動與官方情報</h2>
+        <p style={{ color: "#8a90bf", fontSize: 14 }}>載入中...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>活動與官方情報</h2>
+        <p style={{ color: "#e0428a", fontSize: 14 }}>資料讀取失敗：{loadError}</p>
+      </div>
+    );
+  }
+
+  const withStatus = events.map((e) => ({ ...e, status: getStatus(e, now) }));
 
   const counts = {
     all: withStatus.length,
@@ -294,7 +267,7 @@ export default function EventsPrototype() {
       return aStart - bStart;
     });
 
-  const sortedNews = [...NEWS].sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
+  const sortedNews = [...news].sort((a, b) => new Date(b.publishedAt) - new Date(a.publishedAt));
 
   const TABS = [
     { key: "all", label: "全部" },
