@@ -1,41 +1,16 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { pixelCheckboxStyle, CheckboxMark, pixelBadgeStyle, pixelClip, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
+import { supabase } from "./supabaseClient";
 
-// 每個角色的進化路徑用陣列表示：
+// 角色資料現在從 Supabase 的 characters 表讀取（見下面 useEffect），不再寫死在程式碼裡。
+// 之後要新增角色、修改進化條件，只要去資料庫新增/編輯一列資料就好，不用再回來改程式碼、重新部署一次。
+//
+// 進化路徑（evolution_path）存成資料庫裡的 jsonb 欄位，格式跟以前一樣是陣列：
 // { type: "stage", name, icon } 代表一個階段
 // { type: "conditions", items: [{ name, op, count }] } 代表進化到下一階段需要的條件
-const CHARACTERS = [
-  {
-    id: "c001",
-    name: "跳跳丸",
-    intro: "從嬰兒階段開始成長，依序經過幼兒、青年階段。",
-    evolutionPath: [
-      { type: "stage", name: "嬰兒階段", icon: "嬰兒" },
-      { type: "conditions", items: [{ name: "陸地細胞", op: "=", count: 4 }] },
-      { type: "stage", name: "幼兒階段", icon: "幼兒" },
-      { type: "conditions", items: [{ name: "肉細胞", op: "=", count: 1 }] },
-      { type: "stage", name: "青年階段", icon: "青年" },
-      {
-        type: "conditions",
-        items: [
-          { name: "龍捲風", op: "=", count: 0 },
-          { name: "飯糰", op: ">", count: 5 },
-        ],
-      },
-      { type: "stage", name: "成年階段", icon: "?" },
-    ],
-  },
-  {
-    id: "c002",
-    name: "小圓仔",
-    intro: "剛孵化的初期型態，個性天真愛玩。",
-    evolutionPath: [
-      { type: "stage", name: "蛋", icon: "蛋" },
-      { type: "conditions", items: [{ name: "孵化", op: "=", count: 1 }] },
-      { type: "stage", name: "嬰兒階段", icon: "嬰兒" },
-    ],
-  },
-];
+//
+// 「已收集」的打勾狀態目前仍然只存在這個瀏覽器裡（還沒有訪客帳號系統，換裝置或清瀏覽器資料會不見）——
+// 這是刻意的設計，等之後做訪客帳號系統時，會改成綁在你的帳號上、到哪都看得到。
 
 function EvolutionPath({ path }) {
   return (
@@ -97,11 +72,37 @@ function EvolutionPath({ path }) {
 }
 
 export default function ZukanPrototype() {
+  const [characters, setCharacters] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [query, setQuery] = useState("");
   const [collected, setCollected] = useState({});
   const [openId, setOpenId] = useState(null);
 
-  const filtered = CHARACTERS.filter((c) => c.name.includes(query) || c.intro.includes(query));
+  useEffect(() => {
+    supabase
+      .from("characters")
+      .select("*")
+      .order("id")
+      .then(({ data, error }) => {
+        if (error) {
+          setLoadError(error.message);
+        } else {
+          setCharacters(
+            (data || []).map((c) => ({
+              id: c.id,
+              name: c.name,
+              intro: c.intro || "",
+              image: c.image_url,
+              evolutionPath: c.evolution_path || [],
+            }))
+          );
+        }
+        setLoading(false);
+      });
+  }, []);
+
+  const filtered = characters.filter((c) => c.name.includes(query) || c.intro.includes(query));
 
   const toggleCollected = (id) => {
     setCollected((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -109,11 +110,29 @@ export default function ZukanPrototype() {
 
   const collectedCount = Object.values(collected).filter(Boolean).length;
 
+  if (loading) {
+    return (
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>角色圖鑑</h2>
+        <p style={{ color: "#8a90bf", fontSize: 14 }}>載入中...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>角色圖鑑</h2>
+        <p style={{ color: "#e0428a", fontSize: 14 }}>資料讀取失敗：{loadError}</p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
       <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>角色圖鑑</h2>
       <p style={{ color: "#8a90bf", fontSize: 14, marginTop: 0 }}>
-        已收集 {collectedCount} / {CHARACTERS.length}
+        已收集 {collectedCount} / {characters.length}
       </p>
 
       <input
