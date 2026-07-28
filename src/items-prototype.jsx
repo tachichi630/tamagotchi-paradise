@@ -36,7 +36,7 @@ export default function ItemsPrototype() {
         fieldOrder: c.field_order || [],
         items: (itemRes.data || [])
           .filter((it) => it.category_key === c.key)
-          .map((it) => ({ id: it.id, name: it.name, fields: it.fields || {}, obtain: it.obtain || {} })),
+          .map((it) => ({ id: it.id, name: it.name, image: it.image_url, fields: it.fields || {}, obtain: it.obtain || {} })),
       }));
       setCategories(mapped);
       setActiveKey((prev) => prev || (mapped[0] && mapped[0].key) || null);
@@ -170,17 +170,31 @@ export default function ItemsPrototype() {
                         fontSize: 10,
                         color: "#8a90bf",
                         clipPath: pixelClip(5),
+                        overflow: "hidden",
                       }}
                     >
-                      圖
+                      {it.image ? <img src={it.image} alt={it.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "圖"}
                     </div>
                   </td>
                   <td style={{ padding: 8, fontWeight: 700, whiteSpace: "nowrap", color: OUTLINE }}>{it.name}</td>
-                  {active.fieldOrder.map((f) => (
-                    <td key={f} style={{ padding: 8, whiteSpace: "nowrap", color: "#5a6099" }}>
-                      {it.fields[f]}
-                    </td>
-                  ))}
+                  {active.fieldOrder.map((f) => {
+                    const value = it.fields[f];
+                    const isImageField = value && typeof value === "object";
+                    return (
+                      <td key={f} style={{ padding: 8, whiteSpace: "nowrap", color: "#5a6099" }}>
+                        {isImageField ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            {value.image && (
+                              <img src={value.image} alt="" style={{ width: 22, height: 22, objectFit: "cover", flexShrink: 0, border: "1px solid #c9cfec" }} />
+                            )}
+                            {value.text}
+                          </span>
+                        ) : (
+                          value
+                        )}
+                      </td>
+                    );
+                  })}
                   <td style={{ padding: 8, whiteSpace: "nowrap" }}>
                     {it.obtain.type === "code" ? (
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

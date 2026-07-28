@@ -362,6 +362,10 @@ function CharacterAdmin() {
   );
 }
 
+// 哪些欄位除了文字之外，還可以額外附一張圖片（例如「養成方向」讓大家直接看圖認出對應的寵物長相，
+// 不用只靠記文字名稱）。之後如果還想讓其他欄位（例如「部位」）也能附圖，把欄位名稱加進這個陣列就好。
+const IMAGE_CAPABLE_FIELDS = ["養成方向"];
+
 // ---------- 道具與兌換碼管理 ----------
 function ItemAdmin() {
   const [categories, setCategories] = useState([]);
@@ -370,6 +374,7 @@ function ItemAdmin() {
   const [editingId, setEditingId] = useState(null);
   const [categoryKey, setCategoryKey] = useState("");
   const [name, setName] = useState("");
+  const [imageUrl, setImageUrl] = useState(null);
   const [fieldValues, setFieldValues] = useState({});
   const [obtainType, setObtainType] = useState("shop");
   const [obtainValue, setObtainValue] = useState("");
@@ -396,6 +401,7 @@ function ItemAdmin() {
   const resetForm = () => {
     setEditingId(null);
     setName("");
+    setImageUrl(null);
     setFieldValues({});
     setObtainType("shop");
     setObtainValue("");
@@ -405,6 +411,7 @@ function ItemAdmin() {
     setEditingId(row.id);
     setCategoryKey(row.category_key);
     setName(row.name);
+    setImageUrl(row.image_url);
     setFieldValues(row.fields || {});
     setObtainType((row.obtain && row.obtain.type) || "shop");
     setObtainValue((row.obtain && row.obtain.value) || "");
@@ -419,6 +426,7 @@ function ItemAdmin() {
     const payload = {
       category_key: categoryKey,
       name: name.trim(),
+      image_url: imageUrl,
       fields: fieldValues,
       obtain: { type: obtainType, value: obtainValue.trim() },
     };
@@ -465,11 +473,27 @@ function ItemAdmin() {
         </select>
 
         <input placeholder="道具名稱" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
+        <ImageUploadField value={imageUrl} onChange={setImageUrl} folder="items" />
 
         {activeCategory &&
-          activeCategory.field_order.map((f) => (
-            <input key={f} placeholder={f} value={fieldValues[f] || ""} onChange={(e) => handleFieldChange(f, e.target.value)} style={inputStyle} />
-          ))}
+          activeCategory.field_order.map((f) => {
+            if (IMAGE_CAPABLE_FIELDS.includes(f)) {
+              const current = fieldValues[f];
+              const currentObj = current && typeof current === "object" ? current : { text: current || "", image: null };
+              return (
+                <div key={f} style={{ border: "2px solid #e0e3f5", background: "#fff", padding: 8, marginBottom: 8 }}>
+                  <input
+                    placeholder={f}
+                    value={currentObj.text}
+                    onChange={(e) => handleFieldChange(f, { ...currentObj, text: e.target.value })}
+                    style={{ ...inputStyle, marginBottom: 6 }}
+                  />
+                  <ImageUploadField value={currentObj.image} onChange={(url) => handleFieldChange(f, { ...currentObj, image: url })} folder="items" />
+                </div>
+              );
+            }
+            return <input key={f} placeholder={f} value={fieldValues[f] || ""} onChange={(e) => handleFieldChange(f, e.target.value)} style={inputStyle} />;
+          })}
 
         <label style={labelStyle}>取得方式</label>
         <div style={{ display: "flex", gap: 14, marginBottom: 8 }}>
@@ -500,6 +524,7 @@ function ItemAdmin() {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {list.map((row) => (
           <div key={row.id} style={rowItemStyle}>
+            {row.image_url && <img src={row.image_url} alt="" style={{ width: 36, height: 36, objectFit: "cover", flexShrink: 0 }} />}
             <div style={{ flex: 1, minWidth: 0 }}>
               <strong style={{ color: OUTLINE }}>{row.name}</strong>
               <span style={{ marginLeft: 8, fontSize: 11, color: "#a7abd6" }}>
