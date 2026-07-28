@@ -32,9 +32,10 @@ function EvolutionPath({ path }) {
                   fontSize: 11,
                   color: "#8a90bf",
                   clipPath: pixelClip(6),
+                  overflow: "hidden",
                 }}
               >
-                {step.icon}
+                {step.image ? <img src={step.image} alt={step.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : step.icon}
               </div>
               <div style={{ fontSize: 11, marginTop: 4, fontFamily: BODY_FONT, color: OUTLINE }}>{step.name}</div>
             </div>

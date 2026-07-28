@@ -120,6 +120,133 @@ function ImageUploadField({ value, onChange, folder }) {
   );
 }
 
+function StepControls({ index, total, onMove, onRemove }) {
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+      <button type="button" disabled={index === 0} onClick={() => onMove(index, -1)} style={{ border: "none", background: "none", cursor: index === 0 ? "default" : "pointer", color: index === 0 ? "#d8dbf0" : OUTLINE, fontSize: 14, padding: 0 }}>
+        ↑
+      </button>
+      <button
+        type="button"
+        disabled={index === total - 1}
+        onClick={() => onMove(index, 1)}
+        style={{ border: "none", background: "none", cursor: index === total - 1 ? "default" : "pointer", color: index === total - 1 ? "#d8dbf0" : OUTLINE, fontSize: 14, padding: 0 }}
+      >
+        ↓
+      </button>
+      <button type="button" onClick={() => onRemove(index)} style={{ border: "none", background: "none", cursor: "pointer", color: "#e0428a", fontSize: 12, fontWeight: 700, padding: 0 }}>
+        刪除
+      </button>
+    </div>
+  );
+}
+
+// 進化路徑編輯器：一格一格新增「階段」（名稱＋圖片，圖片跟角色圖鑑頁顯示的一樣大小）
+// 或「進化條件」（一組條件，可以加好幾項），可以用上下箭頭調整順序。
+// 存檔時整段會變成 evolution_path 這個 jsonb 陣列，跟畫面顯示邏輯完全對得上，不用額外轉換。
+function EvolutionPathEditor({ steps, onChange }) {
+  const updateStep = (i, newStep) => onChange(steps.map((s, idx) => (idx === i ? newStep : s)));
+  const removeStep = (i) => onChange(steps.filter((_, idx) => idx !== i));
+  const moveStep = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= steps.length) return;
+    const next = [...steps];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
+  const addStage = () => onChange([...steps, { type: "stage", name: "", image: null }]);
+  const addConditions = () => onChange([...steps, { type: "conditions", items: [{ name: "", op: "=", count: 0 }] }]);
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <label style={labelStyle}>進化路徑</label>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 10 }}>
+        {steps.map((step, i) =>
+          step.type === "stage" ? (
+            <div key={i} style={{ border: "2px solid #c9cfec", padding: 10, background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: "#8a90bf", fontWeight: 700 }}>階段 #{i + 1}</span>
+                <StepControls index={i} total={steps.length} onMove={moveStep} onRemove={removeStep} />
+              </div>
+              <input placeholder="階段名稱（例如：幼兒階段）" value={step.name} onChange={(e) => updateStep(i, { ...step, name: e.target.value })} style={inputStyle} />
+              <ImageUploadField value={step.image} onChange={(url) => updateStep(i, { ...step, image: url })} folder="evolution" />
+            </div>
+          ) : (
+            <div key={i} style={{ border: "2px solid #c9cfec", padding: 10, background: "#f7f8fd" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: "#8a90bf", fontWeight: 700 }}>進化條件</span>
+                <StepControls index={i} total={steps.length} onMove={moveStep} onRemove={removeStep} />
+              </div>
+              {step.items.map((cond, j) => (
+                <div key={j} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                  <input
+                    placeholder="條件名稱"
+                    value={cond.name}
+                    onChange={(e) => {
+                      const items = step.items.map((c, k) => (k === j ? { ...c, name: e.target.value } : c));
+                      updateStep(i, { ...step, items });
+                    }}
+                    style={{ ...inputStyle, marginBottom: 0, flex: 2 }}
+                  />
+                  <select
+                    value={cond.op}
+                    onChange={(e) => {
+                      const items = step.items.map((c, k) => (k === j ? { ...c, op: e.target.value } : c));
+                      updateStep(i, { ...step, items });
+                    }}
+                    style={{ ...inputStyle, marginBottom: 0, flex: "0 0 66px" }}
+                  >
+                    <option value="=">=</option>
+                    <option value=">">&gt;</option>
+                    <option value="<">&lt;</option>
+                    <option value=">=">&gt;=</option>
+                    <option value="<=">&lt;=</option>
+                  </select>
+                  <input
+                    placeholder="數值"
+                    value={cond.count}
+                    onChange={(e) => {
+                      const items = step.items.map((c, k) => (k === j ? { ...c, count: e.target.value } : c));
+                      updateStep(i, { ...step, items });
+                    }}
+                    style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const items = step.items.filter((_, k) => k !== j);
+                      updateStep(i, { ...step, items });
+                    }}
+                    style={{ border: "none", background: "none", color: "#e0428a", cursor: "pointer", fontSize: 16, flexShrink: 0, padding: 0 }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => updateStep(i, { ...step, items: [...step.items, { name: "", op: "=", count: 0 }] })}
+                style={{ fontSize: 11, background: "none", border: "none", color: "#ff5fa2", cursor: "pointer", fontWeight: 700, padding: 0 }}
+              >
+                + 新增一項條件
+              </button>
+            </div>
+          )
+        )}
+        {steps.length === 0 && <p style={{ color: "#a7abd6", fontSize: 12 }}>還沒有任何階段，從下面開始新增</p>}
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <button type="button" onClick={addStage} style={smallBtnStyle}>
+          + 新增階段
+        </button>
+        <button type="button" onClick={addConditions} style={smallBtnStyle}>
+          + 新增進化條件
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------- 角色圖鑑管理 ----------
 function CharacterAdmin() {
   const [list, setList] = useState([]);
@@ -128,6 +255,7 @@ function CharacterAdmin() {
   const [name, setName] = useState("");
   const [intro, setIntro] = useState("");
   const [imageUrl, setImageUrl] = useState(null);
+  const [evolutionSteps, setEvolutionSteps] = useState([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
 
@@ -146,6 +274,7 @@ function CharacterAdmin() {
     setName("");
     setIntro("");
     setImageUrl(null);
+    setEvolutionSteps([]);
   };
 
   const startEdit = (row) => {
@@ -153,18 +282,20 @@ function CharacterAdmin() {
     setName(row.name);
     setIntro(row.intro || "");
     setImageUrl(row.image_url);
+    setEvolutionSteps(row.evolution_path || []);
   };
 
   const handleSave = async () => {
     if (!name.trim()) return setMsg("請輸入角色名稱");
     setSaving(true);
     setMsg("");
+    const payload = { name: name.trim(), intro: intro.trim(), image_url: imageUrl, evolution_path: evolutionSteps };
     if (editingId) {
-      const { error } = await supabase.from("characters").update({ name: name.trim(), intro: intro.trim(), image_url: imageUrl }).eq("id", editingId);
+      const { error } = await supabase.from("characters").update(payload).eq("id", editingId);
       if (error) setMsg("儲存失敗：" + error.message);
     } else {
       const id = "c" + Date.now();
-      const { error } = await supabase.from("characters").insert({ id, name: name.trim(), intro: intro.trim(), image_url: imageUrl, evolution_path: [] });
+      const { error } = await supabase.from("characters").insert({ id, ...payload });
       if (error) setMsg("新增失敗：" + error.message);
     }
     setSaving(false);
@@ -187,7 +318,7 @@ function CharacterAdmin() {
         <input placeholder="角色名稱" value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} />
         <textarea placeholder="簡介" value={intro} onChange={(e) => setIntro(e.target.value)} rows={3} style={{ ...inputStyle, resize: "vertical" }} />
         <ImageUploadField value={imageUrl} onChange={setImageUrl} folder="characters" />
-        <p style={{ fontSize: 11, color: "#a7abd6", margin: "0 0 8px" }}>進化路徑目前還沒有表單可以編輯，需要新增/修改進化條件的話告訴我，我用 SQL 幫你更新。</p>
+        <EvolutionPathEditor steps={evolutionSteps} onChange={setEvolutionSteps} />
         {msg && <p style={{ color: "#e0428a", fontSize: 12, fontWeight: 700 }}>{msg}</p>}
         <div style={{ display: "flex", gap: 10 }}>
           <button onClick={handleSave} disabled={saving} style={pixelButtonStyle("primary", "normal")}>
