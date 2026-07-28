@@ -4,6 +4,7 @@ import ItemsPrototype from "./items-prototype";
 import EventsPrototype from "./events-prototype";
 import ForumPrototype from "./forum-prototype";
 import ReminderWidget from "./reminder-widget";
+import AdminPanel from "./admin-panel";
 import {
   PixelFontLoader,
   pixelPageBg,
@@ -26,6 +27,7 @@ const PAGES = [
   { key: "items", label: "道具與兌換碼" },
   { key: "events", label: "活動一覽" },
   { key: "forum", label: "討論區" },
+  { key: "admin", label: "後台管理" },
 ];
 
 // 首頁「活動快訊」預覽用的精簡資料，跟 events-prototype.jsx 的完整資料是分開的兩份，
@@ -289,6 +291,7 @@ export default function SiteShellPrototype() {
         {page === "items" && <ItemsPrototype />}
         {page === "events" && <EventsPrototype />}
         {page === "forum" && <ForumPrototype />}
+        {page === "admin" && <AdminPanel />}
 
         <Footer />
       </div>
