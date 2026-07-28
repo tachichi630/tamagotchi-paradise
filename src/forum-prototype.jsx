@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { pixelButtonStyle, ButtonShine, pixelTabStyle, pixelClip, pixelFabStyle, FabShine, pixelBadgeStyle, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
+import { supabase } from "./supabaseClient";
 
 // 討論區採「訪客暱稱制」：不需要帳號系統就能發文，但一定要輸入一個顯示暱稱（不能留空），
 // 這樣至少每篇文章有可辨識的身份，避免完全匿名帶來的不負責任感。
@@ -11,78 +12,12 @@ import { pixelButtonStyle, ButtonShine, pixelTabStyle, pixelClip, pixelFabStyle,
 // 這個元件是設計來放進網站骨架（site-shell-prototype.jsx）的 <main> 主內容區裡的，
 // 骨架本身已經有全站共用的頂部導覽列，所以這裡的頁面標題（h2「討論區」）只是內容區自己的標題。
 
-// 每個版現在多了 rules（版規）欄位：一條一條的規則文字，顯示在該版文章列表最上方，
-// 預設收合、點開才看到完整內容，避免佔太多版面。
-const BOARDS = [
-  {
-    key: "beginner",
-    label: "新手詢問區",
-    desc: "剛開始玩、有任何基本問題都可以在這裡問",
-    rules: ["發文前請先用搜尋功能找找看有沒有人問過類似問題", "請盡量描述清楚你卡在哪個步驟，方便大家幫忙"],
-  },
-  {
-    key: "matching",
-    label: "揪團配對區",
-    desc: "找朋友一起玩、互相拜訪配對",
-    rules: ["請註明你的行星等級跟遊玩時段", "配對成功後建議自行到站外聯繫，避免留下過多私人資訊"],
-  },
-  {
-    key: "guide",
-    label: "遊戲攻略討論區",
-    desc: "進化條件、道具搭配等攻略心得",
-    rules: ["攻略內容請盡量親測過再分享，避免誤導其他玩家", "轉載他人攻略請註明出處"],
-  },
-  {
-    key: "baby",
-    label: "寶寶分享區",
-    desc: "曬曬你的寶寶、裝飾成果、成長心得",
-    rules: ["歡迎分享截圖，請確認圖片內容健康、適合所有年齡層觀看"],
-  },
-  {
-    key: "code-report",
-    label: "兌換碼回報區",
-    desc: "發現新的兌換碼或碼失效了都可以回報",
-    rules: ["請確認兌換碼有效再發文，發現失效的碼也歡迎回報", "請勿在同一天重複發同一組碼"],
-  },
-];
-
-// 每篇文章一定屬於某個 boardKey —— 這個欄位不是使用者自己選的，
-// 而是在使用者「已經點進某個版」之後才會出現發文表單，發文時自動帶入目前所在的版面 key。
-//
-// reactions 是每篇文章收到的表情反應統計，key 對應下面 REACTION_TYPES 的 key，value 是次數。
-// pinned：是否置頂，置頂的文章會排在該版列表最前面（不管發文時間）。
-const SEED_POSTS = [
-  {
-    id: "p1",
-    boardKey: "beginner",
-    author: "新手小雞",
-    title: "飽食度掉太快怎麼辦？",
-    content: "剛開始玩，飽食度一下就見底了，有推薦的食物嗎？",
-    image: null,
-    createdAt: "2026-07-25T10:00:00",
-    reactions: { like: 3, helpful: 4 },
-    pinned: false,
-    comments: [
-      { id: "c1", parentId: null, author: "熱心玩家", content: "試試看蘋果派，飽食度回得比較多！", image: null, createdAt: "2026-07-25T11:00:00" },
-      { id: "c1r1", parentId: "c1", author: "新手小雞", content: "謝謝！我去試試看", image: null, createdAt: "2026-07-25T11:20:00" },
-    ],
-  },
-  { id: "p2", boardKey: "matching", author: "阿柚", title: "找人一起互相拜訪！", content: "行星等級6，時間彈性，歡迎揪團～", image: null, createdAt: "2026-07-26T09:00:00", reactions: { like: 1 }, pinned: false, comments: [] },
-  {
-    id: "p3",
-    boardKey: "guide",
-    author: "圖鑑控",
-    title: "跳跳丸青年→成年 條件整理",
-    content: "龍捲風要=0，飯糰要>5，親測有效！",
-    image: null,
-    createdAt: "2026-07-27T20:00:00",
-    reactions: { like: 6, helpful: 5 },
-    pinned: true, // 示範用：這篇當作精華文置頂
-    comments: [{ id: "c2", parentId: null, author: "路人", content: "補充：那一步驟心情要維持滿才會算數", image: null, createdAt: "2026-07-27T21:00:00" }],
-  },
-  { id: "p4", boardKey: "baby", author: "圓仔媽", title: "我家寶寶進化啦～", content: "從蛋孵化到現在的青年階段，好有成就感！", image: null, createdAt: "2026-07-24T15:00:00", reactions: { love: 8, like: 2 }, pinned: false, comments: [] },
-  { id: "p5", boardKey: "code-report", author: "路過玩家", title: "發現一組新碼", content: "9021 5566 可以換到零食，剛剛實測成功！", image: null, createdAt: "2026-07-28T08:00:00", reactions: { helpful: 5, like: 3 }, pinned: false, comments: [] },
-];
+// 看板列表跟文章／留言現在都改成從 Supabase 資料庫讀取（見下面 loadData），
+// 不再寫死在程式碼裡 —— 這樣所有訪客看到的才是「同一份」真實資料，
+// 你在後台置頂、刪文的結果，其他人重新整理後也會看到。
+// 資料庫欄位名稱跟這裡畫面用的欄位名稱稍微不同（例如資料庫是 board_key／description，
+// 畫面沿用原本習慣的 boardKey／desc），loadData 讀出來後會轉換成畫面熟悉的格式，
+// 所以下面所有畫面元件（BoardTabs、PostListItem…）完全不用改。
 
 // 表情反應的分類。icon 之後會換成你自己畫的表情圖示（現在先用文字標籤佔位，用小圓框示意「圖示放這裡」）。
 const REACTION_TYPES = [
@@ -543,10 +478,14 @@ function AdminToggle({ isAdmin, onToggle }) {
 }
 
 export default function ForumPrototype() {
-  // 進來預設先選第一個版，畫面才不會一開始是空的（跟一般網站左側選單的習慣一樣）。
-  const [activeBoardKey, setActiveBoardKey] = useState(BOARDS[0].key);
+  const [boards, setBoards] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  // 進來預設先選第一個版，畫面才不會一開始是空的（跟一般網站左側選單的習慣一樣），
+  // 但一開始資料庫還沒讀完，所以先給 null，等 loadData 抓到看板列表後再補上第一個。
+  const [activeBoardKey, setActiveBoardKey] = useState(null);
   const [selectedPostId, setSelectedPostId] = useState(null);
-  const [posts, setPosts] = useState(SEED_POSTS);
   const [nickname, setNickname] = useState("");
   const [composing, setComposing] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -555,7 +494,49 @@ export default function ForumPrototype() {
   // 記錄「這次瀏覽期間，我按過哪些文章的哪些表情」，格式是 "貼文id:表情key" 的集合。
   const [myReactions, setMyReactions] = useState(() => new Set());
 
-  const activeBoard = BOARDS.find((b) => b.key === activeBoardKey);
+  // 向 Supabase 重新抓一次看板、文章、留言，並組合成畫面原本熟悉的資料格式。
+  // 每次新增文章／留言／表情／置頂之後都會重新呼叫這個函式，確保畫面顯示的是資料庫裡最新的真實資料。
+  const loadData = useCallback(async () => {
+    const [boardRes, postRes, commentRes] = await Promise.all([
+      supabase.from("boards").select("*").order("id"),
+      supabase.from("posts").select("*").order("created_at", { ascending: false }),
+      supabase.from("comments").select("*").order("created_at", { ascending: true }),
+    ]);
+
+    if (boardRes.error || postRes.error || commentRes.error) {
+      setLoadError((boardRes.error || postRes.error || commentRes.error).message);
+      setLoading(false);
+      return;
+    }
+
+    const mappedBoards = (boardRes.data || []).map((b) => ({ key: b.id, label: b.label, desc: b.description, rules: b.rules || [] }));
+    const mappedPosts = (postRes.data || []).map((p) => ({
+      id: p.id,
+      boardKey: p.board_key,
+      author: p.author,
+      title: p.title,
+      content: p.content,
+      image: p.image,
+      reactions: p.reactions || {},
+      pinned: p.pinned,
+      createdAt: p.created_at,
+      comments: (commentRes.data || [])
+        .filter((c) => c.post_id === p.id)
+        .map((c) => ({ id: c.id, parentId: c.parent_id, author: c.author, content: c.content, image: c.image, createdAt: c.created_at })),
+    }));
+
+    setBoards(mappedBoards);
+    setPosts(mappedPosts);
+    setActiveBoardKey((prev) => prev || (mappedBoards[0] && mappedBoards[0].key) || null);
+    setLoadError(null);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const activeBoard = boards.find((b) => b.key === activeBoardKey);
   const postCount = (key) => posts.filter((p) => p.boardKey === key).length;
 
   // 搜尋只比對「文章標題／內容」，目的是讓人發文前先搜尋有沒有人問過類似問題。
@@ -577,56 +558,61 @@ export default function ForumPrototype() {
     setQuery("");
   };
 
-  const handleNewPost = ({ title, content, image }) => {
-    const newPost = {
-      id: `p${Date.now()}`,
-      boardKey: activeBoardKey,
+  // 以下四個動作都是「先寫進資料庫，再重新整批抓一次最新資料」的模式：
+  // 寫法比較簡單、不容易出錯，缺點是每次操作後畫面會有一下下（通常不到一秒）的重新整理感，
+  // 對這個網站的使用規模來說完全沒問題。
+
+  const handleNewPost = async ({ title, content, image }) => {
+    const { error } = await supabase.from("posts").insert({
+      board_key: activeBoardKey,
       author: nickname.trim(),
       title,
       content,
       image: image || null,
-      reactions: {},
-      pinned: false,
-      comments: [],
-      createdAt: new Date().toISOString(),
-    };
-    setPosts((prev) => [newPost, ...prev]);
+    });
+    if (error) {
+      window.alert("發文失敗，請稍後再試：" + error.message);
+      return;
+    }
     setComposing(false);
+    await loadData();
   };
 
-  const handleAddComment = (postId, { author, content, image, parentId = null }) => {
-    setPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId
-          ? { ...p, comments: [...p.comments, { id: `c${Date.now()}`, parentId, author, content, image: image || null, createdAt: new Date().toISOString() }] }
-          : p
-      )
-    );
+  const handleAddComment = async (postId, { author, content, image, parentId = null }) => {
+    const { error } = await supabase.from("comments").insert({ post_id: postId, parent_id: parentId, author, content, image: image || null });
+    if (error) {
+      window.alert("留言失敗，請稍後再試：" + error.message);
+      return;
+    }
+    await loadData();
   };
 
-  const handleToggleReaction = (postId, key) => {
+  const handleToggleReaction = async (postId, key) => {
     const reactionId = `${postId}:${key}`;
     const hasReacted = myReactions.has(reactionId);
+    const post = posts.find((p) => p.id === postId);
+    if (!post) return;
+    const current = post.reactions[key] || 0;
+    const next = hasReacted ? Math.max(0, current - 1) : current + 1;
+    const newReactions = { ...post.reactions, [key]: next };
 
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id !== postId) return p;
-        const current = p.reactions[key] || 0;
-        const next = hasReacted ? Math.max(0, current - 1) : current + 1;
-        return { ...p, reactions: { ...p.reactions, [key]: next } };
-      })
-    );
+    const { error } = await supabase.from("posts").update({ reactions: newReactions }).eq("id", postId);
+    if (error) return;
 
     setMyReactions((prev) => {
-      const next = new Set(prev);
-      if (hasReacted) next.delete(reactionId);
-      else next.add(reactionId);
-      return next;
+      const nextSet = new Set(prev);
+      if (hasReacted) nextSet.delete(reactionId);
+      else nextSet.add(reactionId);
+      return nextSet;
     });
+    await loadData();
   };
 
-  const handleTogglePin = (postId) => {
-    setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, pinned: !p.pinned } : p)));
+  const handleTogglePin = async (postId) => {
+    const post = posts.find((p) => p.id === postId);
+    if (!post) return;
+    await supabase.from("posts").update({ pinned: !post.pinned }).eq("id", postId);
+    await loadData();
   };
 
   const handleToggleAdmin = () => {
@@ -644,6 +630,24 @@ export default function ForumPrototype() {
 
   const myReactionKeysFor = (postId) => REACTION_TYPES.filter((r) => myReactions.has(`${postId}:${r.key}`)).map((r) => r.key);
 
+  if (loading) {
+    return (
+      <div style={{ fontFamily: BODY_FONT, padding: 20 }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>討論區</h2>
+        <p style={{ color: "#8a90bf", fontSize: 14 }}>載入中...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ fontFamily: BODY_FONT, padding: 20 }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>討論區</h2>
+        <p style={{ color: "#e0428a", fontSize: 14 }}>資料讀取失敗：{loadError}</p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ fontFamily: BODY_FONT, padding: 20 }}>
       {/* 頁面標題放在骨架的全站導覽列底下，跟其他頁面（圖鑑、道具、活動）的做法一致 */}
@@ -658,7 +662,7 @@ export default function ForumPrototype() {
       {!selectedPost && (
         <>
           {/* 版面分類籤：橫向排在標題下方，點一個分類，下面就顯示該分類的文章 */}
-          <BoardTabs boards={BOARDS} activeKey={activeBoardKey} onSelect={selectBoard} postCount={postCount} />
+          <BoardTabs boards={boards} activeKey={activeBoardKey} onSelect={selectBoard} postCount={postCount} />
 
           {activeBoard && (
             <>
