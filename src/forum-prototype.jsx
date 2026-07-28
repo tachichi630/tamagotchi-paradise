@@ -46,10 +46,6 @@ function formatDate(iso) {
   return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-// 管理者密語 —— 這只是「示意用」的假權限機制，任何人打開瀏覽器原始碼都看得到這行，完全不安全！
-// 之後接上真正的帳號／後台系統後，「誰能置頂」要改成伺服器端判斷，這裡的寫死密語要整個換掉。
-const ADMIN_PASSPHRASE = "tamagotchi2026";
-
 // 共用的圖片挑選元件：還沒選圖片時顯示「新增圖片」按鈕，選了之後顯示預覽圖＋移除按鈕。
 function ImageField({ imageUrl, onSelect, onRemove }) {
   if (imageUrl) {
@@ -456,12 +452,14 @@ function FeedbackButton({ open, onToggle, onClose }) {
   );
 }
 
-// 管理者模式切換：一個不起眼的小連結，點下去會用瀏覽器內建的 prompt 問密語，
-// 對了就打開管理者模式（可以置頂文章），再點一次就直接關閉（不用再輸入一次密語）。
-function AdminToggle({ isAdmin, onToggle }) {
+// 管理者模式切換：一個不起眼的小連結。還沒登入時點下去會打開登入視窗（Supabase 真帳號密碼），
+// 登入成功後這裡會變成「登出」。是否為管理者不再是前端寫死的假判斷，而是真的向 Supabase
+// 詢問「這個瀏覽器目前有沒有登入」，資料庫那邊的權限規則也會一起檢查，所以就算有人打開瀏覽器
+// 原始碼、或直接呼叫 API，沒有登入就是不能置頂／刪除。
+function AdminToggle({ isAdmin, onOpenLogin, onLogout }) {
   return (
     <button
-      onClick={onToggle}
+      onClick={isAdmin ? onLogout : onOpenLogin}
       style={{
         fontSize: 11,
         background: "none",
@@ -472,8 +470,57 @@ function AdminToggle({ isAdmin, onToggle }) {
         fontWeight: 700,
       }}
     >
-      {isAdmin ? "✅ 管理者模式已開啟（點擊關閉）" : "🔑 管理者模式"}
+      {isAdmin ? "✅ 管理者模式已開啟（點擊登出）" : "🔑 管理者登入"}
     </button>
+  );
+}
+
+// 管理者登入視窗：輸入信箱＋密碼，交給 Supabase Auth 驗證。
+// 這組帳密是在 Supabase 後台「Authentication → Users」自己建立的，只有你知道，
+// 跟你登入 Supabase 網站的帳號是兩回事（那個是你管理資料庫用的，這個是網站訪客看不到的後台鑰匙）。
+function AdminLoginModal({ open, onClose, onLoggedIn }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  if (!open) return null;
+
+  const handleLogin = async () => {
+    setError("");
+    setLoading(true);
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setLoading(false);
+    if (error) {
+      setError("登入失敗，請確認帳號密碼是否正確");
+      return;
+    }
+    setEmail("");
+    setPassword("");
+    onLoggedIn();
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(38,43,82,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200, padding: 20 }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `4px solid ${OUTLINE}`, clipPath: pixelClip(12), padding: 20, width: "min(320px, 90vw)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <strong style={{ fontFamily: PIXEL_FONT, fontSize: 12, color: OUTLINE }}>🔑 管理者登入</strong>
+          <button onClick={onClose} style={{ border: "none", background: "none", fontSize: 18, cursor: "pointer", color: OUTLINE, lineHeight: 1 }}>
+            ✕
+          </button>
+        </div>
+        <input placeholder="管理者信箱" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+        <input type="password" placeholder="密碼" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
+        {error && <p style={{ color: "#e0428a", fontSize: 12, margin: "0 0 8px", fontWeight: 700 }}>{error}</p>}
+        <button onClick={handleLogin} disabled={loading} style={{ ...pixelButtonStyle("primary", "normal"), width: "100%" }}>
+          <ButtonShine />
+          {loading ? "登入中..." : "登入"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -491,8 +538,23 @@ export default function ForumPrototype() {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminModalOpen, setAdminModalOpen] = useState(false);
   // 記錄「這次瀏覽期間，我按過哪些文章的哪些表情」，格式是 "貼文id:表情key" 的集合。
   const [myReactions, setMyReactions] = useState(() => new Set());
+
+  // 監聽 Supabase 的登入狀態：一進頁面先問一次「現在有沒有登入」，
+  // 之後只要登入／登出狀態改變（包含在 AdminLoginModal 裡登入成功），這裡都會自動更新 isAdmin。
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setIsAdmin(!!data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAdmin(!!session);
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
 
   // 向 Supabase 重新抓一次看板、文章、留言，並組合成畫面原本熟悉的資料格式。
   // 每次新增文章／留言／表情／置頂之後都會重新呼叫這個函式，確保畫面顯示的是資料庫裡最新的真實資料。
@@ -590,13 +652,12 @@ export default function ForumPrototype() {
   const handleToggleReaction = async (postId, key) => {
     const reactionId = `${postId}:${key}`;
     const hasReacted = myReactions.has(reactionId);
-    const post = posts.find((p) => p.id === postId);
-    if (!post) return;
-    const current = post.reactions[key] || 0;
-    const next = hasReacted ? Math.max(0, current - 1) : current + 1;
-    const newReactions = { ...post.reactions, [key]: next };
+    const delta = hasReacted ? -1 : 1;
 
-    const { error } = await supabase.from("posts").update({ reactions: newReactions }).eq("id", postId);
+    // 表情反應是唯一「訪客也能寫入」的更新動作，所以不是直接改 posts 表（那個現在鎖住只有管理者能改），
+    // 而是呼叫一個資料庫函式（toggle_reaction），它只被允許動 reactions 這一個欄位，
+    // 這樣訪客可以按讚，但沒辦法透過同一個管道去偷改標題、內容或置頂狀態。
+    const { error } = await supabase.rpc("toggle_reaction", { p_post_id: postId, p_key: key, p_delta: delta });
     if (error) return;
 
     setMyReactions((prev) => {
@@ -613,19 +674,6 @@ export default function ForumPrototype() {
     if (!post) return;
     await supabase.from("posts").update({ pinned: !post.pinned }).eq("id", postId);
     await loadData();
-  };
-
-  const handleToggleAdmin = () => {
-    if (isAdmin) {
-      setIsAdmin(false);
-      return;
-    }
-    const input = window.prompt("請輸入管理者密語：");
-    if (input === ADMIN_PASSPHRASE) {
-      setIsAdmin(true);
-    } else if (input !== null) {
-      window.alert("密語不正確");
-    }
   };
 
   const myReactionKeysFor = (postId) => REACTION_TYPES.filter((r) => myReactions.has(`${postId}:${r.key}`)).map((r) => r.key);
@@ -656,8 +704,10 @@ export default function ForumPrototype() {
           <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>討論區</h2>
           <p style={{ color: "#8a90bf", fontSize: 13, marginTop: 0, marginBottom: 16 }}>發文採訪客暱稱制，不需要帳號；每篇文章都屬於你選擇的版面</p>
         </div>
-        <AdminToggle isAdmin={isAdmin} onToggle={handleToggleAdmin} />
+        <AdminToggle isAdmin={isAdmin} onOpenLogin={() => setAdminModalOpen(true)} onLogout={handleLogout} />
       </div>
+
+      <AdminLoginModal open={adminModalOpen} onClose={() => setAdminModalOpen(false)} onLoggedIn={() => setAdminModalOpen(false)} />
 
       {!selectedPost && (
         <>
