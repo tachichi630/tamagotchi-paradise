@@ -1,0 +1,718 @@
+import React, { useState } from "react";
+import { pixelButtonStyle, ButtonShine, pixelTabStyle, pixelClip, pixelFabStyle, FabShine, pixelBadgeStyle, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
+
+// 討論區採「訪客暱稱制」：不需要帳號系統就能發文，但一定要輸入一個顯示暱稱（不能留空），
+// 這樣至少每篇文章有可辨識的身份，避免完全匿名帶來的不負責任感。
+// 之後若接上帳號系統，可以讓使用者選擇「用帳號發文」或「維持訪客暱稱」，兩者不衝突，不用重做這個資料結構。
+
+// 圖片上傳（無論是文章本身還是留言）目前用瀏覽器內建的「檔案挑選＋本機預覽」方式（URL.createObjectURL），
+// 不需要後端伺服器就能示範上傳、預覽、移除的完整互動。
+
+// 這個元件是設計來放進網站骨架（site-shell-prototype.jsx）的 <main> 主內容區裡的，
+// 骨架本身已經有全站共用的頂部導覽列，所以這裡的頁面標題（h2「討論區」）只是內容區自己的標題。
+
+// 每個版現在多了 rules（版規）欄位：一條一條的規則文字，顯示在該版文章列表最上方，
+// 預設收合、點開才看到完整內容，避免佔太多版面。
+const BOARDS = [
+  {
+    key: "beginner",
+    label: "新手詢問區",
+    desc: "剛開始玩、有任何基本問題都可以在這裡問",
+    rules: ["發文前請先用搜尋功能找找看有沒有人問過類似問題", "請盡量描述清楚你卡在哪個步驟，方便大家幫忙"],
+  },
+  {
+    key: "matching",
+    label: "揪團配對區",
+    desc: "找朋友一起玩、互相拜訪配對",
+    rules: ["請註明你的行星等級跟遊玩時段", "配對成功後建議自行到站外聯繫，避免留下過多私人資訊"],
+  },
+  {
+    key: "guide",
+    label: "遊戲攻略討論區",
+    desc: "進化條件、道具搭配等攻略心得",
+    rules: ["攻略內容請盡量親測過再分享，避免誤導其他玩家", "轉載他人攻略請註明出處"],
+  },
+  {
+    key: "baby",
+    label: "寶寶分享區",
+    desc: "曬曬你的寶寶、裝飾成果、成長心得",
+    rules: ["歡迎分享截圖，請確認圖片內容健康、適合所有年齡層觀看"],
+  },
+  {
+    key: "code-report",
+    label: "兌換碼回報區",
+    desc: "發現新的兌換碼或碼失效了都可以回報",
+    rules: ["請確認兌換碼有效再發文，發現失效的碼也歡迎回報", "請勿在同一天重複發同一組碼"],
+  },
+];
+
+// 每篇文章一定屬於某個 boardKey —— 這個欄位不是使用者自己選的，
+// 而是在使用者「已經點進某個版」之後才會出現發文表單，發文時自動帶入目前所在的版面 key。
+//
+// reactions 是每篇文章收到的表情反應統計，key 對應下面 REACTION_TYPES 的 key，value 是次數。
+// pinned：是否置頂，置頂的文章會排在該版列表最前面（不管發文時間）。
+const SEED_POSTS = [
+  {
+    id: "p1",
+    boardKey: "beginner",
+    author: "新手小雞",
+    title: "飽食度掉太快怎麼辦？",
+    content: "剛開始玩，飽食度一下就見底了，有推薦的食物嗎？",
+    image: null,
+    createdAt: "2026-07-25T10:00:00",
+    reactions: { like: 3, helpful: 4 },
+    pinned: false,
+    comments: [
+      { id: "c1", parentId: null, author: "熱心玩家", content: "試試看蘋果派，飽食度回得比較多！", image: null, createdAt: "2026-07-25T11:00:00" },
+      { id: "c1r1", parentId: "c1", author: "新手小雞", content: "謝謝！我去試試看", image: null, createdAt: "2026-07-25T11:20:00" },
+    ],
+  },
+  { id: "p2", boardKey: "matching", author: "阿柚", title: "找人一起互相拜訪！", content: "行星等級6，時間彈性，歡迎揪團～", image: null, createdAt: "2026-07-26T09:00:00", reactions: { like: 1 }, pinned: false, comments: [] },
+  {
+    id: "p3",
+    boardKey: "guide",
+    author: "圖鑑控",
+    title: "跳跳丸青年→成年 條件整理",
+    content: "龍捲風要=0，飯糰要>5，親測有效！",
+    image: null,
+    createdAt: "2026-07-27T20:00:00",
+    reactions: { like: 6, helpful: 5 },
+    pinned: true, // 示範用：這篇當作精華文置頂
+    comments: [{ id: "c2", parentId: null, author: "路人", content: "補充：那一步驟心情要維持滿才會算數", image: null, createdAt: "2026-07-27T21:00:00" }],
+  },
+  { id: "p4", boardKey: "baby", author: "圓仔媽", title: "我家寶寶進化啦～", content: "從蛋孵化到現在的青年階段，好有成就感！", image: null, createdAt: "2026-07-24T15:00:00", reactions: { love: 8, like: 2 }, pinned: false, comments: [] },
+  { id: "p5", boardKey: "code-report", author: "路過玩家", title: "發現一組新碼", content: "9021 5566 可以換到零食，剛剛實測成功！", image: null, createdAt: "2026-07-28T08:00:00", reactions: { helpful: 5, like: 3 }, pinned: false, comments: [] },
+];
+
+// 表情反應的分類。icon 之後會換成你自己畫的表情圖示（現在先用文字標籤佔位，用小圓框示意「圖示放這裡」）。
+const REACTION_TYPES = [
+  { key: "like", label: "讚" },
+  { key: "love", label: "愛心" },
+  { key: "haha", label: "哈哈" },
+  { key: "helpful", label: "有幫助" },
+];
+
+function totalReactions(reactions) {
+  return Object.values(reactions || {}).reduce((sum, n) => sum + n, 0);
+}
+
+const inputStyle = {
+  width: "100%",
+  padding: 10,
+  marginBottom: 8,
+  border: `2px solid ${OUTLINE}`,
+  boxSizing: "border-box",
+  fontFamily: BODY_FONT,
+  fontSize: 14,
+};
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+// 管理者密語 —— 這只是「示意用」的假權限機制，任何人打開瀏覽器原始碼都看得到這行，完全不安全！
+// 之後接上真正的帳號／後台系統後，「誰能置頂」要改成伺服器端判斷，這裡的寫死密語要整個換掉。
+const ADMIN_PASSPHRASE = "tamagotchi2026";
+
+// 共用的圖片挑選元件：還沒選圖片時顯示「新增圖片」按鈕，選了之後顯示預覽圖＋移除按鈕。
+function ImageField({ imageUrl, onSelect, onRemove }) {
+  if (imageUrl) {
+    return (
+      <div style={{ position: "relative", marginBottom: 8, display: "inline-block" }}>
+        <img src={imageUrl} alt="預覽" style={{ maxWidth: 200, maxHeight: 160, display: "block", border: "2px solid #c9cfec" }} />
+        <button
+          onClick={onRemove}
+          style={{ position: "absolute", top: 4, right: 4, border: "none", background: "rgba(38,43,82,0.75)", color: "#fff", fontSize: 11, padding: "2px 6px", cursor: "pointer" }}
+        >
+          移除
+        </button>
+      </div>
+    );
+  }
+  return (
+    <label style={{ display: "inline-block", fontSize: 12, padding: "6px 12px", border: "2px dashed #c9cfec", color: "#8a90bf", cursor: "pointer", marginBottom: 8, fontFamily: BODY_FONT }}>
+      📷 新增圖片（選填）
+      <input type="file" accept="image/*" onChange={onSelect} style={{ display: "none" }} />
+    </label>
+  );
+}
+
+function ComposeForm({ board, nickname, onNicknameChange, onSubmit, onCancel }) {
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [imageUrl, setImageUrl] = useState(null);
+  const [error, setError] = useState("");
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (file) setImageUrl(URL.createObjectURL(file));
+  };
+
+  const handleSubmit = () => {
+    if (!nickname.trim()) return setError("請輸入暱稱");
+    if (!title.trim() || !content.trim()) return setError("標題與內容都要填寫");
+    onSubmit({ title: title.trim(), content: content.trim(), image: imageUrl });
+    setTitle("");
+    setContent("");
+    setImageUrl(null);
+    setError("");
+  };
+
+  return (
+    <div style={{ border: `3px solid ${OUTLINE}`, padding: 14, marginBottom: 16, background: "#f7f8fd", clipPath: pixelClip(8) }}>
+      <p style={{ margin: "0 0 8px", fontSize: 13, color: "#5a6099" }}>在「{board.label}」發表新文章</p>
+      <input placeholder="暱稱（必填）" value={nickname} onChange={(e) => onNicknameChange(e.target.value)} style={inputStyle} />
+      <input placeholder="標題" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
+      <textarea placeholder="內容" value={content} onChange={(e) => setContent(e.target.value)} rows={4} style={{ ...inputStyle, resize: "vertical" }} />
+      <div>
+        <ImageField imageUrl={imageUrl} onSelect={handleFile} onRemove={() => setImageUrl(null)} />
+      </div>
+      {error && <p style={{ color: "#e0428a", fontSize: 12, margin: "0 0 8px", fontWeight: 700 }}>{error}</p>}
+      <div style={{ display: "flex", gap: 10 }}>
+        <button onClick={handleSubmit} style={pixelButtonStyle("primary", "normal")}>
+          <ButtonShine />
+          送出
+        </button>
+        <button onClick={onCancel} style={pixelButtonStyle("secondary", "normal")}>
+          <ButtonShine />
+          取消
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// 共用的留言表單，也拿來當「回覆」表單用。
+function CommentForm({ nickname, onNicknameChange, onSubmit, placeholder = "留言內容", submitLabel = "送出留言" }) {
+  const [content, setContent] = useState("");
+  const [imageUrl, setImageUrl] = useState(null);
+  const [error, setError] = useState("");
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (file) setImageUrl(URL.createObjectURL(file));
+  };
+
+  const handleSubmit = () => {
+    if (!nickname.trim()) return setError("請輸入暱稱");
+    if (!content.trim()) return setError("請輸入內容");
+    onSubmit({ author: nickname.trim(), content: content.trim(), image: imageUrl });
+    setContent("");
+    setImageUrl(null);
+    setError("");
+  };
+
+  return (
+    <div>
+      <input placeholder="暱稱（必填）" value={nickname} onChange={(e) => onNicknameChange(e.target.value)} style={inputStyle} />
+      <textarea placeholder={placeholder} value={content} onChange={(e) => setContent(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+      <div>
+        <ImageField imageUrl={imageUrl} onSelect={handleFile} onRemove={() => setImageUrl(null)} />
+      </div>
+      {error && <p style={{ color: "#e0428a", fontSize: 12, margin: "0 0 8px", fontWeight: 700 }}>{error}</p>}
+      <button onClick={handleSubmit} style={pixelButtonStyle("primary", "normal")}>
+        <ButtonShine />
+        {submitLabel}
+      </button>
+    </div>
+  );
+}
+
+// 版面分類籤：橫向排列在「討論區」標題下方，點一個分類，下面就顯示對應分類的文章。
+function BoardTabs({ boards, activeKey, onSelect, postCount }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      {boards.map((b) => {
+        const active = b.key === activeKey;
+        return (
+          <button key={b.key} onClick={() => onSelect(b.key)} style={pixelTabStyle(active)}>
+            {b.label} ({postCount(b.key)})
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// 版規區塊：預設收合，點開才顯示完整規則列表。
+function BoardRules({ rules }) {
+  const [open, setOpen] = useState(false);
+  if (!rules || rules.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{ fontSize: 12, background: "none", border: "none", color: "#ff5fa2", cursor: "pointer", padding: 0, fontWeight: 700 }}
+      >
+        {open ? "收合版規 ▲" : "查看版規 ▼"}
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, background: "#f7f8fd", border: "2px solid #e0e3f5", padding: 12 }}>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#5a6099", display: "flex", flexDirection: "column", gap: 4 }}>
+            {rules.map((r, i) => (
+              <li key={i}>{r}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 文章列表裡的一列預覽，點擊（不管點標題或哪裡）都會整篇打開，進到 PostDetail。
+// 置頂文章會在標題前面多一個「📌 置頂」徽章；管理者模式開啟時，右邊會多一顆置頂/取消置頂按鈕。
+function PostListItem({ post, onOpen, isAdmin, onTogglePin }) {
+  return (
+    <div style={{ display: "flex", alignItems: "stretch", gap: 8 }}>
+      <button
+        onClick={onOpen}
+        style={{ display: "block", flex: 1, minWidth: 0, textAlign: "left", border: `2px solid ${OUTLINE}`, padding: 12, background: post.pinned ? "#fff7e6" : "#fff", cursor: "pointer", clipPath: pixelClip(6), fontFamily: BODY_FONT }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+            {post.pinned && <span style={pixelBadgeStyle("yellow")}>📌 置頂</span>}
+            <strong style={{ fontSize: 14, color: OUTLINE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.title}</strong>
+          </span>
+          <span style={{ fontSize: 11, color: "#a7abd6", whiteSpace: "nowrap" }}>{formatDate(post.createdAt)}</span>
+        </div>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#5a6099", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.content}</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+          <span style={{ fontSize: 12, color: "#8a90bf" }}>{post.author}</span>
+          <span style={{ fontSize: 11, color: "#8a90bf", whiteSpace: "nowrap" }}>
+            💬 {post.comments.length} ・ 表情 {totalReactions(post.reactions)}
+          </span>
+        </div>
+      </button>
+
+      {isAdmin && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin(post.id);
+          }}
+          title={post.pinned ? "取消置頂" : "設為置頂"}
+          style={{
+            flexShrink: 0,
+            width: 44,
+            border: `2px solid ${OUTLINE}`,
+            background: post.pinned ? "#ffc93c" : "#fff",
+            cursor: "pointer",
+            clipPath: pixelClip(6),
+            fontSize: 16,
+          }}
+        >
+          📌
+        </button>
+      )}
+    </div>
+  );
+}
+
+// 表情反應列：每個表情一顆按鈕，點一下＝加上這個表情，再點一次＝取消。
+function ReactionBar({ reactions, myKeys, onToggle }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+      {REACTION_TYPES.map((r) => {
+        const active = myKeys.includes(r.key);
+        const count = reactions[r.key] || 0;
+        return (
+          <button
+            key={r.key}
+            onClick={() => onToggle(r.key)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              padding: "6px 12px",
+              border: active ? "2px solid #ff5fa2" : "2px solid #c9cfec",
+              background: active ? "#ffe1ee" : "#fff",
+              color: active ? "#e0428a" : "#8a90bf",
+              cursor: "pointer",
+              clipPath: pixelClip(5),
+              fontFamily: BODY_FONT,
+              fontWeight: active ? 700 : 400,
+            }}
+          >
+            <span
+              style={{
+                width: 16,
+                height: 16,
+                borderRadius: "50%",
+                background: active ? "#ff9dc4" : "#e0e3f5",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 9,
+                color: active ? "#fff" : "#8a90bf",
+                flexShrink: 0,
+              }}
+            >
+              {r.label[0]}
+            </span>
+            {r.label}
+            {count > 0 && <span>（{count}）</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CommentItem({ comment }) {
+  return (
+    <div style={{ background: "#f7f8fd", border: "2px solid #e0e3f5", padding: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+        <strong style={{ color: OUTLINE }}>{comment.author}</strong>
+        <span style={{ color: "#a7abd6" }}>{formatDate(comment.createdAt)}</span>
+      </div>
+      <p style={{ margin: "4px 0 0", fontSize: 13, color: "#5a6099" }}>{comment.content}</p>
+      {comment.image && <img src={comment.image} alt="" style={{ maxWidth: "100%", maxHeight: 200, marginTop: 6, display: "block", border: "2px solid #c9cfec" }} />}
+    </div>
+  );
+}
+
+function CommentThread({ comment, replies, nickname, onNicknameChange, replyOpen, onToggleReply, onReply }) {
+  return (
+    <div>
+      <CommentItem comment={comment} />
+      {replies.length > 0 && (
+        <div style={{ marginLeft: 20, marginTop: 6, paddingLeft: 12, borderLeft: "3px solid #e0e3f5", display: "flex", flexDirection: "column", gap: 6 }}>
+          {replies.map((r) => (
+            <CommentItem key={r.id} comment={r} />
+          ))}
+        </div>
+      )}
+      <button onClick={onToggleReply} style={{ marginLeft: 20, marginTop: 4, fontSize: 11, background: "none", border: "none", color: "#ff5fa2", cursor: "pointer", padding: 0, fontWeight: 700 }}>
+        {replyOpen ? "取消回覆" : "回覆"}
+      </button>
+      {replyOpen && (
+        <div style={{ marginLeft: 20, marginTop: 6 }}>
+          <CommentForm nickname={nickname} onNicknameChange={onNicknameChange} onSubmit={onReply} placeholder={`回覆給 ${comment.author}...`} submitLabel="送出回覆" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 點進單篇文章後的完整內容頁：文章本文 + 表情反應 + 完整留言區。管理者模式開啟時，標題旁多一顆置頂切換鈕。
+function PostDetail({ post, nickname, onNicknameChange, onAddComment, myReactionKeys, onToggleReaction, onBack, isAdmin, onTogglePin }) {
+  const [replyingTo, setReplyingTo] = useState(null);
+
+  const topLevelComments = post.comments.filter((c) => !c.parentId);
+  const repliesOf = (commentId) => post.comments.filter((c) => c.parentId === commentId);
+
+  return (
+    <div>
+      <button onClick={onBack} style={{ ...pixelButtonStyle("secondary", "normal"), marginBottom: 14, padding: "10px 20px" }}>
+        <ButtonShine />← 返回文章列表
+      </button>
+
+      <div style={{ border: `3px solid ${OUTLINE}`, padding: 16, clipPath: pixelClip(8), background: "#fff" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {post.pinned && <span style={pixelBadgeStyle("yellow")}>📌 置頂</span>}
+            <h3 style={{ margin: 0, color: OUTLINE }}>{post.title}</h3>
+          </span>
+          <span style={{ fontSize: 12, color: "#a7abd6", whiteSpace: "nowrap" }}>{formatDate(post.createdAt)}</span>
+        </div>
+        <p style={{ margin: "8px 0 0", fontSize: 14, color: "#5a6099", whiteSpace: "pre-wrap" }}>{post.content}</p>
+        {post.image && <img src={post.image} alt="" style={{ maxWidth: "100%", maxHeight: 360, marginTop: 10, display: "block", border: "2px solid #c9cfec" }} />}
+        <p style={{ margin: "10px 0 0", fontSize: 12, color: "#8a90bf" }}>— {post.author}</p>
+
+        {isAdmin && (
+          <button onClick={() => onTogglePin(post.id)} style={{ ...pixelButtonStyle("secondary", "normal"), marginTop: 10, padding: "8px 16px", fontSize: 11 }}>
+            <ButtonShine />
+            {post.pinned ? "取消置頂" : "設為置頂"}
+          </button>
+        )}
+
+        <ReactionBar reactions={post.reactions} myKeys={myReactionKeys} onToggle={onToggleReaction} />
+      </div>
+
+      <div style={{ marginTop: 20 }}>
+        <h4 style={{ marginBottom: 10, color: OUTLINE }}>留言（{post.comments.length}）</h4>
+
+        {topLevelComments.length === 0 ? (
+          <p style={{ fontSize: 13, color: "#8a90bf" }}>還沒有留言，來當第一個回覆的人吧</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 14 }}>
+            {topLevelComments.map((c) => (
+              <CommentThread
+                key={c.id}
+                comment={c}
+                replies={repliesOf(c.id)}
+                nickname={nickname}
+                onNicknameChange={onNicknameChange}
+                replyOpen={replyingTo === c.id}
+                onToggleReply={() => setReplyingTo(replyingTo === c.id ? null : c.id)}
+                onReply={(data) => {
+                  onAddComment(post.id, { ...data, parentId: c.id });
+                  setReplyingTo(null);
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        <CommentForm nickname={nickname} onNicknameChange={onNicknameChange} onSubmit={(data) => onAddComment(post.id, data)} />
+      </div>
+    </div>
+  );
+}
+
+// 意見回饋是「私下回報給網站擁有者」的管道，不是公開版面，其他訪客看不到內容。
+const SITE_OWNER_EMAIL = "a42969266@gmail.com";
+
+function FeedbackButton({ open, onToggle, onClose }) {
+  const [message, setMessage] = useState("");
+  const [contact, setContact] = useState("");
+  const [hover, setHover] = useState(false);
+
+  const handleSend = () => {
+    if (!message.trim()) return;
+    const subject = encodeURIComponent("Tamagotchi Paradise 網站意見回饋");
+    const body = encodeURIComponent(`${message}\n\n（聯絡方式：${contact || "未留"}）`);
+    window.location.href = `mailto:${SITE_OWNER_EMAIL}?subject=${subject}&body=${body}`;
+    setMessage("");
+    setContact("");
+    onClose();
+  };
+
+  return (
+    <>
+      <button
+        onClick={onToggle}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        title="意見回饋"
+        style={{ position: "fixed", right: 24, bottom: 24, ...pixelFabStyle(hover) }}
+      >
+        <FabShine />
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+          <path d="M4 4h16v12H9l-5 5V4z" stroke="#fff" strokeWidth="2.2" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          onClick={onClose}
+          style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(38,43,82,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}
+        >
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `4px solid ${OUTLINE}`, clipPath: pixelClip(12), padding: 18, width: "min(360px, 90vw)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <strong style={{ color: OUTLINE }}>意見回饋</strong>
+              <button onClick={onClose} style={{ border: "none", background: "none", fontSize: 18, cursor: "pointer", color: OUTLINE, lineHeight: 1 }}>
+                ✕
+              </button>
+            </div>
+            <p style={{ fontSize: 12, color: "#8a90bf", margin: "0 0 8px" }}>這裡是私下回報給網站管理者，其他人看不到。點送出後會開啟你的信箱寄出。</p>
+            <textarea placeholder="想告訴我們的建議、問題或錯誤回報..." value={message} onChange={(e) => setMessage(e.target.value)} rows={4} style={{ ...inputStyle, resize: "vertical" }} />
+            <input placeholder="聯絡方式（選填，方便回覆你）" value={contact} onChange={(e) => setContact(e.target.value)} style={inputStyle} />
+            <button onClick={handleSend} style={{ ...pixelButtonStyle("primary", "normal"), width: "100%" }}>
+              <ButtonShine />
+              送出
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// 管理者模式切換：一個不起眼的小連結，點下去會用瀏覽器內建的 prompt 問密語，
+// 對了就打開管理者模式（可以置頂文章），再點一次就直接關閉（不用再輸入一次密語）。
+function AdminToggle({ isAdmin, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        fontSize: 11,
+        background: "none",
+        border: "none",
+        color: isAdmin ? "#4ecb5f" : "#c7cbf0",
+        cursor: "pointer",
+        padding: 0,
+        fontWeight: 700,
+      }}
+    >
+      {isAdmin ? "✅ 管理者模式已開啟（點擊關閉）" : "🔑 管理者模式"}
+    </button>
+  );
+}
+
+export default function ForumPrototype() {
+  // 進來預設先選第一個版，畫面才不會一開始是空的（跟一般網站左側選單的習慣一樣）。
+  const [activeBoardKey, setActiveBoardKey] = useState(BOARDS[0].key);
+  const [selectedPostId, setSelectedPostId] = useState(null);
+  const [posts, setPosts] = useState(SEED_POSTS);
+  const [nickname, setNickname] = useState("");
+  const [composing, setComposing] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  // 記錄「這次瀏覽期間，我按過哪些文章的哪些表情」，格式是 "貼文id:表情key" 的集合。
+  const [myReactions, setMyReactions] = useState(() => new Set());
+
+  const activeBoard = BOARDS.find((b) => b.key === activeBoardKey);
+  const postCount = (key) => posts.filter((p) => p.boardKey === key).length;
+
+  // 搜尋只比對「文章標題／內容」，目的是讓人發文前先搜尋有沒有人問過類似問題。
+  // 排序：置頂的一律排最前面，其餘依發文時間新到舊排序。
+  const boardPosts = posts
+    .filter((p) => p.boardKey === activeBoardKey)
+    .filter((p) => !query.trim() || p.title.includes(query.trim()) || p.content.includes(query.trim()))
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+
+  const selectedPost = posts.find((p) => p.id === selectedPostId) || null;
+
+  const selectBoard = (key) => {
+    setActiveBoardKey(key);
+    setSelectedPostId(null);
+    setComposing(false);
+    setQuery("");
+  };
+
+  const handleNewPost = ({ title, content, image }) => {
+    const newPost = {
+      id: `p${Date.now()}`,
+      boardKey: activeBoardKey,
+      author: nickname.trim(),
+      title,
+      content,
+      image: image || null,
+      reactions: {},
+      pinned: false,
+      comments: [],
+      createdAt: new Date().toISOString(),
+    };
+    setPosts((prev) => [newPost, ...prev]);
+    setComposing(false);
+  };
+
+  const handleAddComment = (postId, { author, content, image, parentId = null }) => {
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? { ...p, comments: [...p.comments, { id: `c${Date.now()}`, parentId, author, content, image: image || null, createdAt: new Date().toISOString() }] }
+          : p
+      )
+    );
+  };
+
+  const handleToggleReaction = (postId, key) => {
+    const reactionId = `${postId}:${key}`;
+    const hasReacted = myReactions.has(reactionId);
+
+    setPosts((prev) =>
+      prev.map((p) => {
+        if (p.id !== postId) return p;
+        const current = p.reactions[key] || 0;
+        const next = hasReacted ? Math.max(0, current - 1) : current + 1;
+        return { ...p, reactions: { ...p.reactions, [key]: next } };
+      })
+    );
+
+    setMyReactions((prev) => {
+      const next = new Set(prev);
+      if (hasReacted) next.delete(reactionId);
+      else next.add(reactionId);
+      return next;
+    });
+  };
+
+  const handleTogglePin = (postId) => {
+    setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, pinned: !p.pinned } : p)));
+  };
+
+  const handleToggleAdmin = () => {
+    if (isAdmin) {
+      setIsAdmin(false);
+      return;
+    }
+    const input = window.prompt("請輸入管理者密語：");
+    if (input === ADMIN_PASSPHRASE) {
+      setIsAdmin(true);
+    } else if (input !== null) {
+      window.alert("密語不正確");
+    }
+  };
+
+  const myReactionKeysFor = (postId) => REACTION_TYPES.filter((r) => myReactions.has(`${postId}:${r.key}`)).map((r) => r.key);
+
+  return (
+    <div style={{ fontFamily: BODY_FONT, padding: 20 }}>
+      {/* 頁面標題放在骨架的全站導覽列底下，跟其他頁面（圖鑑、道具、活動）的做法一致 */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+        <div>
+          <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>討論區</h2>
+          <p style={{ color: "#8a90bf", fontSize: 13, marginTop: 0, marginBottom: 16 }}>發文採訪客暱稱制，不需要帳號；每篇文章都屬於你選擇的版面</p>
+        </div>
+        <AdminToggle isAdmin={isAdmin} onToggle={handleToggleAdmin} />
+      </div>
+
+      {!selectedPost && (
+        <>
+          {/* 版面分類籤：橫向排在標題下方，點一個分類，下面就顯示該分類的文章 */}
+          <BoardTabs boards={BOARDS} activeKey={activeBoardKey} onSelect={selectBoard} postCount={postCount} />
+
+          {activeBoard && (
+            <>
+              <p style={{ color: "#5a6099", fontSize: 13, marginTop: 0 }}>{activeBoard.desc}</p>
+
+              <BoardRules rules={activeBoard.rules} />
+
+              <input
+                placeholder="搜尋這個版的文章標題或內容關鍵字...（發文前可以先搜尋看看）"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                style={{ ...inputStyle, marginBottom: 12 }}
+              />
+
+              {!composing && (
+                <button onClick={() => setComposing(true)} style={{ ...pixelButtonStyle("primary", "normal"), marginBottom: 16 }}>
+                  <ButtonShine />
+                  發表新文章
+                </button>
+              )}
+
+              {composing && <ComposeForm board={activeBoard} nickname={nickname} onNicknameChange={setNickname} onSubmit={handleNewPost} onCancel={() => setComposing(false)} />}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {boardPosts.map((p) => (
+                  <PostListItem key={p.id} post={p} onOpen={() => setSelectedPostId(p.id)} isAdmin={isAdmin} onTogglePin={handleTogglePin} />
+                ))}
+                {boardPosts.length === 0 &&
+                  (query.trim() ? (
+                    <p style={{ color: "#8a90bf", fontSize: 14 }}>找不到符合「{query.trim()}」的文章，要不要當第一個發文的人？</p>
+                  ) : (
+                    <p style={{ color: "#8a90bf", fontSize: 14 }}>這個版還沒有文章，來當第一個發文的人吧</p>
+                  ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {selectedPost && (
+        <PostDetail
+          post={selectedPost}
+          nickname={nickname}
+          onNicknameChange={setNickname}
+          onAddComment={handleAddComment}
+          myReactionKeys={myReactionKeysFor(selectedPost.id)}
+          onToggleReaction={(key) => handleToggleReaction(selectedPost.id, key)}
+          onBack={() => setSelectedPostId(null)}
+          isAdmin={isAdmin}
+          onTogglePin={handleTogglePin}
+        />
+      )}
+
+      <FeedbackButton open={feedbackOpen} onToggle={() => setFeedbackOpen((v) => !v)} onClose={() => setFeedbackOpen(false)} />
+    </div>
+  );
+}
