@@ -1,56 +1,78 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { pixelTabStyle, pixelCheckboxStyle, CheckboxMark, pixelClip, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
+import { supabase } from "./supabaseClient";
 
 // obtain.type: "shop"（商店取得，不用打勾追蹤，除非該分類本身是永久道具）
 //              "code" （兌換碼取得，一律需要打勾追蹤是否已兌換）
 // category.alwaysTrackable：這個分類的道具即使用商店取得，也要能打勾記錄「已取得」（例如永久裝飾）
-
-const CATEGORIES = [
-  {
-    key: "food",
-    label: "食物",
-    alwaysTrackable: false,
-    fieldOrder: ["價格", "自製成本", "製作", "作用", "養成方向"],
-    items: [
-      { id: "f1", name: "牛排", fields: { 價格: "600", 自製成本: "30", 製作: "3小塊肉", 作用: "+6飽食度", 養成方向: "羔羔青年（陸地紅）" }, obtain: { type: "shop", value: "行星6級商店" } },
-      { id: "f2", name: "蘋果派", fields: { 價格: "800", 自製成本: "60", 製作: "3蘋果", 作用: "+6飽食度", 養成方向: "特庫特庫青年（陸地黃）" }, obtain: { type: "shop", value: "行星6級商店" } },
-      { id: "f3", name: "黑白麵包", fields: { 價格: "10", 自製成本: "-", 製作: "-", 作用: "+2飽食度", 養成方向: "-" }, obtain: { type: "code", value: "6398 4717" } },
-      { id: "f4", name: "方便麵", fields: { 價格: "150", 自製成本: "-", 製作: "-", 作用: "+2飽食度", 養成方向: "-" }, obtain: { type: "code", value: "7532 4651" } },
-    ],
-  },
-  {
-    key: "snack",
-    label: "零食",
-    alwaysTrackable: false,
-    fieldOrder: ["價格", "作用", "BUFF"],
-    items: [
-      { id: "s1", name: "紅色魔飲", fields: { 價格: "5000", 作用: "+1心情", BUFF: "角色變紅" }, obtain: { type: "shop", value: "行星8級" } },
-      { id: "s2", name: "心情棒棒烤薄餅", fields: { 價格: "3000", 作用: "+20心情", BUFF: "心情下降變慢" }, obtain: { type: "shop", value: "行星7級" } },
-      { id: "s3", name: "雞蛋小圓餅", fields: { 價格: "150", 作用: "+10心情（+1）", BUFF: "-" }, obtain: { type: "code", value: "1792 8690" } },
-      { id: "s4", name: "森永巧克力牛奶糖冰淇淋", fields: { 價格: "250", 作用: "+10心情（+1）", BUFF: "-" }, obtain: { type: "code", value: "1739 0274" } },
-    ],
-  },
-  {
-    key: "decoration",
-    label: "行星裝飾",
-    alwaysTrackable: true,
-    fieldOrder: ["部位", "價格", "途徑"],
-    items: [
-      { id: "d1", name: "蘋果帽", fields: { 部位: "頭", 價格: "400", 途徑: "商店輪換" }, obtain: { type: "shop", value: "行星6級" } },
-      { id: "d2", name: "皇冠", fields: { 部位: "頭", 價格: "1500", 途徑: "商店輪換" }, obtain: { type: "shop", value: "行星6級" } },
-      { id: "d3", name: "吉他", fields: { 部位: "身", 價格: "600", 途徑: "商店輪換" }, obtain: { type: "shop", value: "行星6級" } },
-      { id: "d4", name: "心型太陽眼鏡", fields: { 部位: "臉", 價格: "500", 途徑: "商店輪換" }, obtain: { type: "shop", value: "行星6級" } },
-    ],
-  },
-];
+//
+// 分類（categories）與道具（items）現在都從 Supabase 讀取，不再寫死在程式碼裡，
+// 之後要新增道具、調整價格，直接在資料庫改就好，不用再回來改程式碼。
+// 「已取得」的打勾狀態一樣先維持只存在這個瀏覽器裡，跟角色圖鑑的收藏狀態同樣的設計考量。
 
 export default function ItemsPrototype() {
-  const [activeKey, setActiveKey] = useState(CATEGORIES[0].key);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [activeKey, setActiveKey] = useState(null);
   const [owned, setOwned] = useState({});
   const [query, setQuery] = useState("");
   const [copiedId, setCopiedId] = useState(null);
 
-  const active = CATEGORIES.find((c) => c.key === activeKey);
+  useEffect(() => {
+    Promise.all([
+      supabase.from("categories").select("*").order("sort_order"),
+      supabase.from("items").select("*").order("id"),
+    ]).then(([catRes, itemRes]) => {
+      if (catRes.error || itemRes.error) {
+        setLoadError((catRes.error || itemRes.error).message);
+        setLoading(false);
+        return;
+      }
+      const mapped = (catRes.data || []).map((c) => ({
+        key: c.key,
+        label: c.label,
+        alwaysTrackable: c.always_trackable,
+        fieldOrder: c.field_order || [],
+        items: (itemRes.data || [])
+          .filter((it) => it.category_key === c.key)
+          .map((it) => ({ id: it.id, name: it.name, fields: it.fields || {}, obtain: it.obtain || {} })),
+      }));
+      setCategories(mapped);
+      setActiveKey((prev) => prev || (mapped[0] && mapped[0].key) || null);
+      setLoading(false);
+    });
+  }, []);
+
+  const active = categories.find((c) => c.key === activeKey);
+
+  if (loading) {
+    return (
+      <div style={{ maxWidth: 820, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>道具與兌換碼一覽</h2>
+        <p style={{ color: "#8a90bf", fontSize: 14 }}>載入中...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ maxWidth: 820, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>道具與兌換碼一覽</h2>
+        <p style={{ color: "#e0428a", fontSize: 14 }}>資料讀取失敗：{loadError}</p>
+      </div>
+    );
+  }
+
+  if (!active) {
+    return (
+      <div style={{ maxWidth: 820, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
+        <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>道具與兌換碼一覽</h2>
+        <p style={{ color: "#8a90bf", fontSize: 14 }}>目前還沒有分類資料</p>
+      </div>
+    );
+  }
+
   const filteredItems = active.items.filter((it) => it.name.includes(query));
 
   const isTrackable = (item) => active.alwaysTrackable || item.obtain.type === "code";
@@ -76,7 +98,7 @@ export default function ItemsPrototype() {
       </p>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        {CATEGORIES.map((c) => (
+        {categories.map((c) => (
           <button
             key={c.key}
             onClick={() => {
