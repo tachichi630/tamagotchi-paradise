@@ -59,7 +59,11 @@ function EvolutionPath({ path }) {
                     color: OUTLINE,
                   }}
                 >
-                  <span style={{ width: 14, height: 14, background: "#c9cfec", display: "inline-block" }} />
+                  {it.image ? (
+                    <img src={it.image} alt="" style={{ width: 14, height: 14, objectFit: "cover", display: "inline-block", flexShrink: 0 }} />
+                  ) : (
+                    <span style={{ width: 14, height: 14, background: "#c9cfec", display: "inline-block", flexShrink: 0 }} />
+                  )}
                   {it.name} {it.op}
                   {it.count}
                 </div>
@@ -178,9 +182,10 @@ export default function ZukanPrototype() {
                   color: "#8a90bf",
                   flexShrink: 0,
                   clipPath: pixelClip(6),
+                  overflow: "hidden",
                 }}
               >
-                圖片
+                {c.image ? <img src={c.image} alt={c.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : "圖片"}
               </div>
 
               <div style={{ flex: 1 }}>

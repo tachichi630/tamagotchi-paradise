@@ -155,7 +155,7 @@ function EvolutionPathEditor({ steps, onChange }) {
     onChange(next);
   };
   const addStage = () => onChange([...steps, { type: "stage", name: "", image: null }]);
-  const addConditions = () => onChange([...steps, { type: "conditions", items: [{ name: "", op: "=", count: 0 }] }]);
+  const addConditions = () => onChange([...steps, { type: "conditions", items: [{ name: "", op: "=", count: 0, image: null }] }]);
 
   return (
     <div style={{ marginBottom: 8 }}>
@@ -178,54 +178,64 @@ function EvolutionPathEditor({ steps, onChange }) {
                 <StepControls index={i} total={steps.length} onMove={moveStep} onRemove={removeStep} />
               </div>
               {step.items.map((cond, j) => (
-                <div key={j} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-                  <input
-                    placeholder="條件名稱"
-                    value={cond.name}
-                    onChange={(e) => {
-                      const items = step.items.map((c, k) => (k === j ? { ...c, name: e.target.value } : c));
+                <div key={j} style={{ border: "2px solid #e0e3f5", background: "#fff", padding: 8, marginBottom: 6 }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                    <input
+                      placeholder="條件名稱"
+                      value={cond.name}
+                      onChange={(e) => {
+                        const items = step.items.map((c, k) => (k === j ? { ...c, name: e.target.value } : c));
+                        updateStep(i, { ...step, items });
+                      }}
+                      style={{ ...inputStyle, marginBottom: 0, flex: 2 }}
+                    />
+                    <select
+                      value={cond.op}
+                      onChange={(e) => {
+                        const items = step.items.map((c, k) => (k === j ? { ...c, op: e.target.value } : c));
+                        updateStep(i, { ...step, items });
+                      }}
+                      style={{ ...inputStyle, marginBottom: 0, flex: "0 0 66px" }}
+                    >
+                      <option value="=">=</option>
+                      <option value=">">&gt;</option>
+                      <option value="<">&lt;</option>
+                      <option value=">=">&gt;=</option>
+                      <option value="<=">&lt;=</option>
+                    </select>
+                    <input
+                      placeholder="數值"
+                      value={cond.count}
+                      onChange={(e) => {
+                        const items = step.items.map((c, k) => (k === j ? { ...c, count: e.target.value } : c));
+                        updateStep(i, { ...step, items });
+                      }}
+                      style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const items = step.items.filter((_, k) => k !== j);
+                        updateStep(i, { ...step, items });
+                      }}
+                      style={{ border: "none", background: "none", color: "#e0428a", cursor: "pointer", fontSize: 16, flexShrink: 0, padding: 0 }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <ImageUploadField
+                    value={cond.image}
+                    onChange={(url) => {
+                      const items = step.items.map((c, k) => (k === j ? { ...c, image: url } : c));
                       updateStep(i, { ...step, items });
                     }}
-                    style={{ ...inputStyle, marginBottom: 0, flex: 2 }}
+                    folder="evolution"
                   />
-                  <select
-                    value={cond.op}
-                    onChange={(e) => {
-                      const items = step.items.map((c, k) => (k === j ? { ...c, op: e.target.value } : c));
-                      updateStep(i, { ...step, items });
-                    }}
-                    style={{ ...inputStyle, marginBottom: 0, flex: "0 0 66px" }}
-                  >
-                    <option value="=">=</option>
-                    <option value=">">&gt;</option>
-                    <option value="<">&lt;</option>
-                    <option value=">=">&gt;=</option>
-                    <option value="<=">&lt;=</option>
-                  </select>
-                  <input
-                    placeholder="數值"
-                    value={cond.count}
-                    onChange={(e) => {
-                      const items = step.items.map((c, k) => (k === j ? { ...c, count: e.target.value } : c));
-                      updateStep(i, { ...step, items });
-                    }}
-                    style={{ ...inputStyle, marginBottom: 0, flex: 1 }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const items = step.items.filter((_, k) => k !== j);
-                      updateStep(i, { ...step, items });
-                    }}
-                    style={{ border: "none", background: "none", color: "#e0428a", cursor: "pointer", fontSize: 16, flexShrink: 0, padding: 0 }}
-                  >
-                    ✕
-                  </button>
                 </div>
               ))}
               <button
                 type="button"
-                onClick={() => updateStep(i, { ...step, items: [...step.items, { name: "", op: "=", count: 0 }] })}
+                onClick={() => updateStep(i, { ...step, items: [...step.items, { name: "", op: "=", count: 0, image: null }] })}
                 style={{ fontSize: 11, background: "none", border: "none", color: "#ff5fa2", cursor: "pointer", fontWeight: 700, padding: 0 }}
               >
                 + 新增一項條件
