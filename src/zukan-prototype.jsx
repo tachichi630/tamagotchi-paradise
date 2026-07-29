@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { pixelCheckboxStyle, CheckboxMark, pixelBadgeStyle, pixelClip, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
 import { supabase } from "./supabaseClient";
+import { useAuth } from "./auth-context";
 
 // 角色資料現在從 Supabase 的 characters 表讀取（見下面 useEffect），不再寫死在程式碼裡。
 // 之後要新增角色、修改進化條件，只要去資料庫新增/編輯一列資料就好，不用再回來改程式碼、重新部署一次。
@@ -9,8 +10,8 @@ import { supabase } from "./supabaseClient";
 // { type: "stage", name, icon } 代表一個階段
 // { type: "conditions", items: [{ name, op, count }] } 代表進化到下一階段需要的條件
 //
-// 「已收集」的打勾狀態目前仍然只存在這個瀏覽器裡（還沒有訪客帳號系統，換裝置或清瀏覽器資料會不見）——
-// 這是刻意的設計，等之後做訪客帳號系統時，會改成綁在你的帳號上、到哪都看得到。
+// 「已收集」的打勾狀態：登入會員會存進 user_collections 表，綁在帳號上，換裝置、清瀏覽器資料都還在。
+// 未登入的訪客打勾只會暫存在這次瀏覽的畫面上，重新整理或關掉分頁就會消失（不會寫進資料庫）。
 
 function EvolutionPath({ path }) {
   return (
@@ -77,6 +78,7 @@ function EvolutionPath({ path }) {
 }
 
 export default function ZukanPrototype() {
+  const { user } = useAuth();
   const [characters, setCharacters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -107,10 +109,39 @@ export default function ZukanPrototype() {
       });
   }, []);
 
+  // 登入才去讀這個帳號收藏過的角色；登出／未登入時清空（訪客用本機暫存，不查資料庫）
+  useEffect(() => {
+    if (!user) {
+      setCollected({});
+      return;
+    }
+    supabase
+      .from("user_collections")
+      .select("item_id")
+      .eq("user_id", user.id)
+      .eq("item_type", "character")
+      .then(({ data, error }) => {
+        if (!error) {
+          const map = {};
+          (data || []).forEach((row) => {
+            map[row.item_id] = true;
+          });
+          setCollected(map);
+        }
+      });
+  }, [user]);
+
   const filtered = characters.filter((c) => c.name.includes(query) || c.intro.includes(query));
 
-  const toggleCollected = (id) => {
-    setCollected((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleCollected = async (id) => {
+    const wasCollected = !!collected[id];
+    setCollected((prev) => ({ ...prev, [id]: !wasCollected }));
+    if (!user) return; // 訪客：只在畫面上暫存，不寫入資料庫
+    if (wasCollected) {
+      await supabase.from("user_collections").delete().eq("user_id", user.id).eq("item_type", "character").eq("item_id", String(id));
+    } else {
+      await supabase.from("user_collections").insert({ user_id: user.id, item_type: "character", item_id: String(id) });
+    }
   };
 
   const collectedCount = Object.values(collected).filter(Boolean).length;
@@ -138,6 +169,7 @@ export default function ZukanPrototype() {
       <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>角色圖鑑</h2>
       <p style={{ color: "#8a90bf", fontSize: 14, marginTop: 0 }}>
         已收集 {collectedCount} / {characters.length}
+        {!user && <span style={{ marginLeft: 8, fontSize: 12 }}>（訪客身分，打勾只會暫存這次瀏覽，登入才會永久保存）</span>}
       </p>
 
       <input

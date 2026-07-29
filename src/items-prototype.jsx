@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { pixelTabStyle, pixelCheckboxStyle, CheckboxMark, pixelClip, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
 import { supabase } from "./supabaseClient";
+import { useAuth } from "./auth-context";
 
 // obtain.type: "shop"（商店取得，不用打勾追蹤，除非該分類本身是永久道具）
 //              "code" （兌換碼取得，一律需要打勾追蹤是否已兌換）
@@ -8,9 +9,11 @@ import { supabase } from "./supabaseClient";
 //
 // 分類（categories）與道具（items）現在都從 Supabase 讀取，不再寫死在程式碼裡，
 // 之後要新增道具、調整價格，直接在資料庫改就好，不用再回來改程式碼。
-// 「已取得」的打勾狀態一樣先維持只存在這個瀏覽器裡，跟角色圖鑑的收藏狀態同樣的設計考量。
+// 「已取得」的打勾狀態：登入會員會存進 user_collections 表，綁在帳號上，跟角色圖鑑同一張表、
+// 用 item_type = "item" 區分。未登入的訪客打勾只會暫存在這次瀏覽的畫面上。
 
 export default function ItemsPrototype() {
+  const { user } = useAuth();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -18,6 +21,28 @@ export default function ItemsPrototype() {
   const [owned, setOwned] = useState({});
   const [query, setQuery] = useState("");
   const [copiedId, setCopiedId] = useState(null);
+
+  // 登入才去讀這個帳號已取得過的道具；登出／未登入時清空（訪客用本機暫存，不查資料庫）
+  useEffect(() => {
+    if (!user) {
+      setOwned({});
+      return;
+    }
+    supabase
+      .from("user_collections")
+      .select("item_id")
+      .eq("user_id", user.id)
+      .eq("item_type", "item")
+      .then(({ data, error }) => {
+        if (!error) {
+          const map = {};
+          (data || []).forEach((row) => {
+            map[row.item_id] = true;
+          });
+          setOwned(map);
+        }
+      });
+  }, [user]);
 
   useEffect(() => {
     Promise.all([
@@ -79,7 +104,16 @@ export default function ItemsPrototype() {
   const trackableItems = active.items.filter(isTrackable);
   const ownedCount = trackableItems.filter((it) => owned[it.id]).length;
 
-  const toggleOwned = (id) => setOwned((prev) => ({ ...prev, [id]: !prev[id] }));
+  const toggleOwned = async (id) => {
+    const wasOwned = !!owned[id];
+    setOwned((prev) => ({ ...prev, [id]: !wasOwned }));
+    if (!user) return; // 訪客：只在畫面上暫存，不寫入資料庫
+    if (wasOwned) {
+      await supabase.from("user_collections").delete().eq("user_id", user.id).eq("item_type", "item").eq("item_id", String(id));
+    } else {
+      await supabase.from("user_collections").insert({ user_id: user.id, item_type: "item", item_id: String(id) });
+    }
+  };
 
   const copyCode = async (id, code) => {
     try {
@@ -115,6 +149,7 @@ export default function ItemsPrototype() {
       {trackableItems.length > 0 && (
         <p style={{ fontSize: 13, color: "#8a90bf" }}>
           已取得 {ownedCount} / {trackableItems.length}
+          {!user && <span style={{ marginLeft: 8, fontSize: 12 }}>（訪客身分，打勾只會暫存這次瀏覽，登入才會永久保存）</span>}
         </p>
       )}
 
