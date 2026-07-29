@@ -5,11 +5,14 @@ import EventsPrototype from "./events-prototype";
 import ForumPrototype from "./forum-prototype";
 import ReminderWidget from "./reminder-widget";
 import AdminPanel from "./admin-panel";
+import { AuthProvider, useAuth } from "./auth-context";
 import {
   PixelFontLoader,
   pixelPageBg,
   pixelNavButtonStyle,
   pixelBadgeStyle,
+  pixelButtonStyle,
+  ButtonShine,
   pixelClip,
   OUTLINE,
   PIXEL_FONT,
@@ -21,13 +24,14 @@ import {
 // 圖鑑／道具／活動／討論區四個功能頁面的內容邏輯完全沒有更動，只是被裝進這個骨架的
 // <main> 主內容區裡展示，導覽列、頁面切換邏輯、首頁排版都是骨架自己的。
 
+// 「後台管理」故意不放在這個固定清單裡 —— 它只會在使用者用會員登入方式登入、
+// 而且那個帳號在資料庫裡被標記為管理者時，才會出現在導覽列，一般訪客完全看不到這個入口。
 const PAGES = [
   { key: "home", label: "首頁" },
   { key: "zukan", label: "角色圖鑑" },
   { key: "items", label: "道具與兌換碼" },
   { key: "events", label: "活動一覽" },
   { key: "forum", label: "討論區" },
-  { key: "admin", label: "後台管理" },
 ];
 
 // 首頁「活動快訊」預覽用的精簡資料，跟 events-prototype.jsx 的完整資料是分開的兩份，
@@ -46,7 +50,88 @@ const FORUM_PREVIEW = [
   { id: "p2", title: "找人一起互相拜訪！", board: "揪團配對區", replyCount: 1, reactionCount: 4 },
 ];
 
+const authInputStyle = {
+  width: "100%",
+  padding: 10,
+  marginBottom: 8,
+  border: `2px solid ${OUTLINE}`,
+  boxSizing: "border-box",
+  fontFamily: BODY_FONT,
+  fontSize: 14,
+};
+
+// 會員登入／註冊視窗：所有人（包含你自己）都用同一個入口登入，網站不會另外顯示一個
+// 「管理者登入」的按鈕。登入之後是不是管理者，是根據 profiles 表裡的 is_admin 欄位決定的。
+function AuthModal({ open, onClose }) {
+  const { signIn, signUp } = useAuth();
+  const [mode, setMode] = useState("login"); // 'login' | 'signup'
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  if (!open) return null;
+
+  const handleSubmit = async () => {
+    setError("");
+    if (!email.trim() || !password) return setError("請輸入信箱與密碼");
+    if (mode === "signup" && !displayName.trim()) return setError("請輸入暱稱");
+    setLoading(true);
+    const { error } = mode === "login" ? await signIn(email, password) : await signUp(email, password, displayName);
+    setLoading(false);
+    if (error) {
+      setError(mode === "login" ? "登入失敗，請確認帳號密碼是否正確" : "註冊失敗：" + error.message);
+      return;
+    }
+    setEmail("");
+    setPassword("");
+    setDisplayName("");
+    onClose();
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(38,43,82,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200, padding: 20 }}
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `4px solid ${OUTLINE}`, clipPath: pixelClip(12), padding: 20, width: "min(320px, 90vw)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 14 }}>
+            <button
+              onClick={() => setMode("login")}
+              style={{ border: "none", background: "none", cursor: "pointer", fontFamily: PIXEL_FONT, fontSize: 12, color: mode === "login" ? OUTLINE : "#c7cbf0", padding: 0 }}
+            >
+              登入
+            </button>
+            <button
+              onClick={() => setMode("signup")}
+              style={{ border: "none", background: "none", cursor: "pointer", fontFamily: PIXEL_FONT, fontSize: 12, color: mode === "signup" ? OUTLINE : "#c7cbf0", padding: 0 }}
+            >
+              註冊
+            </button>
+          </div>
+          <button onClick={onClose} style={{ border: "none", background: "none", fontSize: 18, cursor: "pointer", color: OUTLINE, lineHeight: 1 }}>
+            ✕
+          </button>
+        </div>
+        {mode === "signup" && <input placeholder="暱稱" value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={authInputStyle} />}
+        <input placeholder="信箱" value={email} onChange={(e) => setEmail(e.target.value)} style={authInputStyle} />
+        <input type="password" placeholder="密碼" value={password} onChange={(e) => setPassword(e.target.value)} style={authInputStyle} />
+        {error && <p style={{ color: "#e0428a", fontSize: 12, margin: "0 0 8px", fontWeight: 700 }}>{error}</p>}
+        <button onClick={handleSubmit} disabled={loading} style={{ ...pixelButtonStyle("primary", "normal"), width: "100%" }}>
+          <ButtonShine />
+          {loading ? "處理中..." : mode === "login" ? "登入" : "註冊"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TopNav({ current, onNavigate }) {
+  const { user, profile, isAdmin, signOut } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
+
   return (
     <header
       style={{
@@ -74,13 +159,31 @@ function TopNav({ current, onNavigate }) {
       >
         🐣 TAMAGOTCHI PARADISE
       </button>
-      <nav style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <nav style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         {PAGES.filter((p) => p.key !== "home").map((p) => (
           <button key={p.key} onClick={() => onNavigate(p.key)} style={pixelNavButtonStyle(current === p.key)}>
             {p.label}
           </button>
         ))}
+        {isAdmin && (
+          <button onClick={() => onNavigate("admin")} style={pixelNavButtonStyle(current === "admin")}>
+            後台管理
+          </button>
+        )}
+        {user ? (
+          <button
+            onClick={signOut}
+            style={{ border: "none", background: "none", cursor: "pointer", color: "#fff", fontSize: 12, fontFamily: BODY_FONT, opacity: 0.85 }}
+          >
+            👤 {profile ? profile.display_name : "..."}（登出）
+          </button>
+        ) : (
+          <button onClick={() => setAuthOpen(true)} style={pixelNavButtonStyle(false)}>
+            登入 / 註冊
+          </button>
+        )}
       </nav>
+      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} />
     </header>
   );
 }
@@ -280,21 +383,23 @@ export default function SiteShellPrototype() {
   const [page, setPage] = useState("home");
 
   return (
-    <div style={{ minHeight: "100vh", ...pixelPageBg() }}>
-      <PixelFontLoader />
-      <ReminderWidget />
-      <div style={{ maxWidth: 960, margin: "0 auto" }}>
-        <TopNav current={page} onNavigate={setPage} />
+    <AuthProvider>
+      <div style={{ minHeight: "100vh", ...pixelPageBg() }}>
+        <PixelFontLoader />
+        <ReminderWidget />
+        <div style={{ maxWidth: 960, margin: "0 auto" }}>
+          <TopNav current={page} onNavigate={setPage} />
 
-        {page === "home" && <HomePage onNavigate={setPage} />}
-        {page === "zukan" && <ZukanPrototype />}
-        {page === "items" && <ItemsPrototype />}
-        {page === "events" && <EventsPrototype />}
-        {page === "forum" && <ForumPrototype />}
-        {page === "admin" && <AdminPanel />}
+          {page === "home" && <HomePage onNavigate={setPage} />}
+          {page === "zukan" && <ZukanPrototype />}
+          {page === "items" && <ItemsPrototype />}
+          {page === "events" && <EventsPrototype />}
+          {page === "forum" && <ForumPrototype />}
+          {page === "admin" && <AdminPanel />}
 
-        <Footer />
+          <Footer />
+        </div>
       </div>
-    </div>
+    </AuthProvider>
   );
 }

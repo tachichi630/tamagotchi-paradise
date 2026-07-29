@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { pixelButtonStyle, ButtonShine, pixelTabStyle, pixelClip, pixelFabStyle, FabShine, pixelBadgeStyle, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
 import { supabase } from "./supabaseClient";
+import { useAuth } from "./auth-context";
 
-// 討論區採「訪客暱稱制」：不需要帳號系統就能發文，但一定要輸入一個顯示暱稱（不能留空），
-// 這樣至少每篇文章有可辨識的身份，避免完全匿名帶來的不負責任感。
-// 之後若接上帳號系統，可以讓使用者選擇「用帳號發文」或「維持訪客暱稱」，兩者不衝突，不用重做這個資料結構。
+// 討論區現在改成「會員限定」發文／留言：沒登入只能瀏覽，發文、留言、回覆都需要先用網站右上角
+// 的「登入 / 註冊」登入會員帳號。文章、留言上顯示的名字是登入帳號的暱稱（profiles.display_name），
+// 不再讓使用者自己臨時輸入暱稱。
+//
+// 是否為管理者（可以置頂）不再是這個檔案自己管理，而是共用 auth-context.jsx 裡的 isAdmin，
+// 跟頂部導覽列、後台管理用的是同一份登入狀態。
 
 // 圖片上傳（無論是文章本身還是留言）目前用瀏覽器內建的「檔案挑選＋本機預覽」方式（URL.createObjectURL），
 // 不需要後端伺服器就能示範上傳、預覽、移除的完整互動。
@@ -69,7 +73,7 @@ function ImageField({ imageUrl, onSelect, onRemove }) {
   );
 }
 
-function ComposeForm({ board, nickname, onNicknameChange, onSubmit, onCancel }) {
+function ComposeForm({ board, onSubmit, onCancel }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState(null);
@@ -81,7 +85,6 @@ function ComposeForm({ board, nickname, onNicknameChange, onSubmit, onCancel }) 
   };
 
   const handleSubmit = () => {
-    if (!nickname.trim()) return setError("請輸入暱稱");
     if (!title.trim() || !content.trim()) return setError("標題與內容都要填寫");
     onSubmit({ title: title.trim(), content: content.trim(), image: imageUrl });
     setTitle("");
@@ -93,7 +96,6 @@ function ComposeForm({ board, nickname, onNicknameChange, onSubmit, onCancel }) 
   return (
     <div style={{ border: `3px solid ${OUTLINE}`, padding: 14, marginBottom: 16, background: "#f7f8fd", clipPath: pixelClip(8) }}>
       <p style={{ margin: "0 0 8px", fontSize: 13, color: "#5a6099" }}>在「{board.label}」發表新文章</p>
-      <input placeholder="暱稱（必填）" value={nickname} onChange={(e) => onNicknameChange(e.target.value)} style={inputStyle} />
       <input placeholder="標題" value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} />
       <textarea placeholder="內容" value={content} onChange={(e) => setContent(e.target.value)} rows={4} style={{ ...inputStyle, resize: "vertical" }} />
       <div>
@@ -115,7 +117,7 @@ function ComposeForm({ board, nickname, onNicknameChange, onSubmit, onCancel }) 
 }
 
 // 共用的留言表單，也拿來當「回覆」表單用。
-function CommentForm({ nickname, onNicknameChange, onSubmit, placeholder = "留言內容", submitLabel = "送出留言" }) {
+function CommentForm({ onSubmit, placeholder = "留言內容", submitLabel = "送出留言" }) {
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState(null);
   const [error, setError] = useState("");
@@ -126,9 +128,8 @@ function CommentForm({ nickname, onNicknameChange, onSubmit, placeholder = "留�
   };
 
   const handleSubmit = () => {
-    if (!nickname.trim()) return setError("請輸入暱稱");
     if (!content.trim()) return setError("請輸入內容");
-    onSubmit({ author: nickname.trim(), content: content.trim(), image: imageUrl });
+    onSubmit({ content: content.trim(), image: imageUrl });
     setContent("");
     setImageUrl(null);
     setError("");
@@ -136,7 +137,6 @@ function CommentForm({ nickname, onNicknameChange, onSubmit, placeholder = "留�
 
   return (
     <div>
-      <input placeholder="暱稱（必填）" value={nickname} onChange={(e) => onNicknameChange(e.target.value)} style={inputStyle} />
       <textarea placeholder={placeholder} value={content} onChange={(e) => setContent(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
       <div>
         <ImageField imageUrl={imageUrl} onSelect={handleFile} onRemove={() => setImageUrl(null)} />
@@ -304,7 +304,7 @@ function CommentItem({ comment }) {
   );
 }
 
-function CommentThread({ comment, replies, nickname, onNicknameChange, replyOpen, onToggleReply, onReply }) {
+function CommentThread({ comment, replies, user, replyOpen, onToggleReply, onReply }) {
   return (
     <div>
       <CommentItem comment={comment} />
@@ -315,20 +315,26 @@ function CommentThread({ comment, replies, nickname, onNicknameChange, replyOpen
           ))}
         </div>
       )}
-      <button onClick={onToggleReply} style={{ marginLeft: 20, marginTop: 4, fontSize: 11, background: "none", border: "none", color: "#ff5fa2", cursor: "pointer", padding: 0, fontWeight: 700 }}>
-        {replyOpen ? "取消回覆" : "回覆"}
-      </button>
-      {replyOpen && (
-        <div style={{ marginLeft: 20, marginTop: 6 }}>
-          <CommentForm nickname={nickname} onNicknameChange={onNicknameChange} onSubmit={onReply} placeholder={`回覆給 ${comment.author}...`} submitLabel="送出回覆" />
-        </div>
+      {user ? (
+        <>
+          <button onClick={onToggleReply} style={{ marginLeft: 20, marginTop: 4, fontSize: 11, background: "none", border: "none", color: "#ff5fa2", cursor: "pointer", padding: 0, fontWeight: 700 }}>
+            {replyOpen ? "取消回覆" : "回覆"}
+          </button>
+          {replyOpen && (
+            <div style={{ marginLeft: 20, marginTop: 6 }}>
+              <CommentForm onSubmit={onReply} placeholder={`回覆給 ${comment.author}...`} submitLabel="送出回覆" />
+            </div>
+          )}
+        </>
+      ) : (
+        <p style={{ marginLeft: 20, marginTop: 4, fontSize: 11, color: "#a7abd6" }}>登入後才能回覆</p>
       )}
     </div>
   );
 }
 
 // 點進單篇文章後的完整內容頁：文章本文 + 表情反應 + 完整留言區。管理者模式開啟時，標題旁多一顆置頂切換鈕。
-function PostDetail({ post, nickname, onNicknameChange, onAddComment, myReactionKeys, onToggleReaction, onBack, isAdmin, onTogglePin }) {
+function PostDetail({ post, user, onAddComment, myReactionKeys, onToggleReaction, onBack, isAdmin, onTogglePin }) {
   const [replyingTo, setReplyingTo] = useState(null);
 
   const topLevelComments = post.comments.filter((c) => !c.parentId);
@@ -374,8 +380,7 @@ function PostDetail({ post, nickname, onNicknameChange, onAddComment, myReaction
                 key={c.id}
                 comment={c}
                 replies={repliesOf(c.id)}
-                nickname={nickname}
-                onNicknameChange={onNicknameChange}
+                user={user}
                 replyOpen={replyingTo === c.id}
                 onToggleReply={() => setReplyingTo(replyingTo === c.id ? null : c.id)}
                 onReply={(data) => {
@@ -387,7 +392,11 @@ function PostDetail({ post, nickname, onNicknameChange, onAddComment, myReaction
           </div>
         )}
 
-        <CommentForm nickname={nickname} onNicknameChange={onNicknameChange} onSubmit={(data) => onAddComment(post.id, data)} />
+        {user ? (
+          <CommentForm onSubmit={(data) => onAddComment(post.id, data)} />
+        ) : (
+          <p style={{ fontSize: 13, color: "#8a90bf" }}>登入後才能留言，請點右上角「登入 / 註冊」。</p>
+        )}
       </div>
     </div>
   );
@@ -452,78 +461,6 @@ function FeedbackButton({ open, onToggle, onClose }) {
   );
 }
 
-// 管理者模式切換：一個不起眼的小連結。還沒登入時點下去會打開登入視窗（Supabase 真帳號密碼），
-// 登入成功後這裡會變成「登出」。是否為管理者不再是前端寫死的假判斷，而是真的向 Supabase
-// 詢問「這個瀏覽器目前有沒有登入」，資料庫那邊的權限規則也會一起檢查，所以就算有人打開瀏覽器
-// 原始碼、或直接呼叫 API，沒有登入就是不能置頂／刪除。
-function AdminToggle({ isAdmin, onOpenLogin, onLogout }) {
-  return (
-    <button
-      onClick={isAdmin ? onLogout : onOpenLogin}
-      style={{
-        fontSize: 11,
-        background: "none",
-        border: "none",
-        color: isAdmin ? "#4ecb5f" : "#c7cbf0",
-        cursor: "pointer",
-        padding: 0,
-        fontWeight: 700,
-      }}
-    >
-      {isAdmin ? "✅ 管理者模式已開啟（點擊登出）" : "🔑 管理者登入"}
-    </button>
-  );
-}
-
-// 管理者登入視窗：輸入信箱＋密碼，交給 Supabase Auth 驗證。
-// 這組帳密是在 Supabase 後台「Authentication → Users」自己建立的，只有你知道，
-// 跟你登入 Supabase 網站的帳號是兩回事（那個是你管理資料庫用的，這個是網站訪客看不到的後台鑰匙）。
-function AdminLoginModal({ open, onClose, onLoggedIn }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  if (!open) return null;
-
-  const handleLogin = async () => {
-    setError("");
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    setLoading(false);
-    if (error) {
-      setError("登入失敗，請確認帳號密碼是否正確");
-      return;
-    }
-    setEmail("");
-    setPassword("");
-    onLoggedIn();
-  };
-
-  return (
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(38,43,82,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1200, padding: 20 }}
-    >
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", border: `4px solid ${OUTLINE}`, clipPath: pixelClip(12), padding: 20, width: "min(320px, 90vw)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <strong style={{ fontFamily: PIXEL_FONT, fontSize: 12, color: OUTLINE }}>🔑 管理者登入</strong>
-          <button onClick={onClose} style={{ border: "none", background: "none", fontSize: 18, cursor: "pointer", color: OUTLINE, lineHeight: 1 }}>
-            ✕
-          </button>
-        </div>
-        <input placeholder="管理者信箱" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
-        <input type="password" placeholder="密碼" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
-        {error && <p style={{ color: "#e0428a", fontSize: 12, margin: "0 0 8px", fontWeight: 700 }}>{error}</p>}
-        <button onClick={handleLogin} disabled={loading} style={{ ...pixelButtonStyle("primary", "normal"), width: "100%" }}>
-          <ButtonShine />
-          {loading ? "登入中..." : "登入"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export default function ForumPrototype() {
   const [boards, setBoards] = useState([]);
   const [posts, setPosts] = useState([]);
@@ -533,28 +470,13 @@ export default function ForumPrototype() {
   // 但一開始資料庫還沒讀完，所以先給 null，等 loadData 抓到看板列表後再補上第一個。
   const [activeBoardKey, setActiveBoardKey] = useState(null);
   const [selectedPostId, setSelectedPostId] = useState(null);
-  const [nickname, setNickname] = useState("");
   const [composing, setComposing] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminModalOpen, setAdminModalOpen] = useState(false);
+  // 登入狀態、暱稱、是否為管理者，全部改成從共用的 auth-context 拿，不再由這個檔案自己管理。
+  const { user, profile, isAdmin } = useAuth();
   // 記錄「這次瀏覽期間，我按過哪些文章的哪些表情」，格式是 "貼文id:表情key" 的集合。
   const [myReactions, setMyReactions] = useState(() => new Set());
-
-  // 監聽 Supabase 的登入狀態：一進頁面先問一次「現在有沒有登入」，
-  // 之後只要登入／登出狀態改變（包含在 AdminLoginModal 裡登入成功），這裡都會自動更新 isAdmin。
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setIsAdmin(!!data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAdmin(!!session);
-    });
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-  };
 
   // 向 Supabase 重新抓一次看板、文章、留言，並組合成畫面原本熟悉的資料格式。
   // 每次新增文章／留言／表情／置頂之後都會重新呼叫這個函式，確保畫面顯示的是資料庫裡最新的真實資料。
@@ -625,9 +547,11 @@ export default function ForumPrototype() {
   // 對這個網站的使用規模來說完全沒問題。
 
   const handleNewPost = async ({ title, content, image }) => {
+    if (!user) return;
     const { error } = await supabase.from("posts").insert({
       board_key: activeBoardKey,
-      author: nickname.trim(),
+      user_id: user.id,
+      author: (profile && profile.display_name) || "會員",
       title,
       content,
       image: image || null,
@@ -640,8 +564,16 @@ export default function ForumPrototype() {
     await loadData();
   };
 
-  const handleAddComment = async (postId, { author, content, image, parentId = null }) => {
-    const { error } = await supabase.from("comments").insert({ post_id: postId, parent_id: parentId, author, content, image: image || null });
+  const handleAddComment = async (postId, { content, image, parentId = null }) => {
+    if (!user) return;
+    const { error } = await supabase.from("comments").insert({
+      post_id: postId,
+      parent_id: parentId,
+      user_id: user.id,
+      author: (profile && profile.display_name) || "會員",
+      content,
+      image: image || null,
+    });
     if (error) {
       window.alert("留言失敗，請稍後再試：" + error.message);
       return;
@@ -702,12 +634,9 @@ export default function ForumPrototype() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
         <div>
           <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>討論區</h2>
-          <p style={{ color: "#8a90bf", fontSize: 13, marginTop: 0, marginBottom: 16 }}>發文採訪客暱稱制，不需要帳號；每篇文章都屬於你選擇的版面</p>
+          <p style={{ color: "#8a90bf", fontSize: 13, marginTop: 0, marginBottom: 16 }}>登入會員才能發文與留言；每篇文章都屬於你選擇的版面</p>
         </div>
-        <AdminToggle isAdmin={isAdmin} onOpenLogin={() => setAdminModalOpen(true)} onLogout={handleLogout} />
       </div>
-
-      <AdminLoginModal open={adminModalOpen} onClose={() => setAdminModalOpen(false)} onLoggedIn={() => setAdminModalOpen(false)} />
 
       {!selectedPost && (
         <>
@@ -727,14 +656,19 @@ export default function ForumPrototype() {
                 style={{ ...inputStyle, marginBottom: 12 }}
               />
 
-              {!composing && (
-                <button onClick={() => setComposing(true)} style={{ ...pixelButtonStyle("primary", "normal"), marginBottom: 16 }}>
-                  <ButtonShine />
-                  發表新文章
-                </button>
+              {user ? (
+                <>
+                  {!composing && (
+                    <button onClick={() => setComposing(true)} style={{ ...pixelButtonStyle("primary", "normal"), marginBottom: 16 }}>
+                      <ButtonShine />
+                      發表新文章
+                    </button>
+                  )}
+                  {composing && <ComposeForm board={activeBoard} onSubmit={handleNewPost} onCancel={() => setComposing(false)} />}
+                </>
+              ) : (
+                <p style={{ color: "#8a90bf", fontSize: 13, marginBottom: 16 }}>登入後才能發表文章，請點右上角「登入 / 註冊」。</p>
               )}
-
-              {composing && <ComposeForm board={activeBoard} nickname={nickname} onNicknameChange={setNickname} onSubmit={handleNewPost} onCancel={() => setComposing(false)} />}
 
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {boardPosts.map((p) => (
@@ -755,8 +689,7 @@ export default function ForumPrototype() {
       {selectedPost && (
         <PostDetail
           post={selectedPost}
-          nickname={nickname}
-          onNicknameChange={setNickname}
+          user={user}
           onAddComment={handleAddComment}
           myReactionKeys={myReactionKeysFor(selectedPost.id)}
           onToggleReaction={(key) => handleToggleReaction(selectedPost.id, key)}

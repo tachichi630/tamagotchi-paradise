@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { pixelButtonStyle, ButtonShine, pixelTabStyle, pixelClip, OUTLINE, PIXEL_FONT, BODY_FONT } from "./pixel-ui";
 import { supabase } from "./supabaseClient";
+import { useAuth } from "./auth-context";
 
-// 後台管理頁：只有登入的管理者才能看到編輯介面（沒登入就只會看到登入表單）。
+// 後台管理頁：登入狀態改成共用 auth-context.jsx，這個頁面本身已經只會在導覽列判斷你是
+// 管理者之後才會出現連結，這裡再檢查一次 isAdmin 只是多一層保險（就算有人硬是把畫面切到這頁，
+// 沒有管理者權限也只會看到提示文字，看不到任何編輯功能，資料庫那邊的規則也會擋掉實際的寫入動作）。
+//
 // 三個分頁（角色圖鑑／道具與兌換碼／活動與官方情報）分別對應各自的資料表，
 // 每個分頁都是「上面一個新增/編輯表單＋下面一份清單（可以點編輯/刪除）」的固定模式。
 //
@@ -45,38 +49,6 @@ const smallBtnStyle = {
 
 const smallDangerBtnStyle = { ...smallBtnStyle, border: "2px solid #e0428a", color: "#e0428a" };
 
-// 管理者登入表單（跟討論區的登入視窗用同一組 Supabase 帳號，登入狀態是共用的）
-function LoginPane() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const handleLogin = async () => {
-    setError("");
-    setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-    setLoading(false);
-    if (error) {
-      setError("登入失敗，請確認帳號密碼是否正確");
-      return;
-    }
-    setEmail("");
-    setPassword("");
-  };
-
-  return (
-    <div style={{ border: `3px solid ${OUTLINE}`, padding: 16, clipPath: pixelClip(8), background: "#fff", maxWidth: 320 }}>
-      <input placeholder="管理者信箱" value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
-      <input type="password" placeholder="密碼" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} />
-      {error && <p style={{ color: "#e0428a", fontSize: 12, margin: "0 0 8px", fontWeight: 700 }}>{error}</p>}
-      <button onClick={handleLogin} disabled={loading} style={{ ...pixelButtonStyle("primary", "normal"), width: "100%" }}>
-        <ButtonShine />
-        {loading ? "登入中..." : "登入"}
-      </button>
-    </div>
-  );
-}
 
 // 圖片上傳共用元件：選檔案 → 上傳到 Supabase Storage 的 images 這個 bucket → 拿到公開網址存起來。
 // folder 參數只是拿來把不同種類的圖片分開放資料夾（characters/items/events），方便你之後在
@@ -698,28 +670,10 @@ function EventAdmin() {
 }
 
 export default function AdminPanel() {
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [checking, setChecking] = useState(true);
+  const { user, isAdmin, loading, signOut } = useAuth();
   const [tab, setTab] = useState("characters");
 
-  // 登入狀態跟討論區共用同一組 Supabase Auth session，在任何一個地方登入，
-  // 兩邊都會同步變成「已登入」，不用分開登入兩次。
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setIsAdmin(!!data.session);
-      setChecking(false);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAdmin(!!session);
-    });
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-  };
-
-  if (checking) {
+  if (loading) {
     return (
       <div style={{ maxWidth: 680, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
         <p style={{ color: "#8a90bf" }}>載入中...</p>
@@ -730,10 +684,12 @@ export default function AdminPanel() {
   return (
     <div style={{ maxWidth: 680, margin: "0 auto", padding: 20, fontFamily: BODY_FONT }}>
       <h2 style={{ marginBottom: 4, fontFamily: PIXEL_FONT, fontSize: 16, color: OUTLINE }}>後台管理</h2>
-      <p style={{ color: "#8a90bf", fontSize: 13, marginTop: 0, marginBottom: 16 }}>只有登入的管理者能新增/編輯/刪除內容</p>
+      <p style={{ color: "#8a90bf", fontSize: 13, marginTop: 0, marginBottom: 16 }}>只有管理者帳號能新增/編輯/刪除內容</p>
 
       {!isAdmin ? (
-        <LoginPane />
+        <p style={{ color: "#8a90bf", fontSize: 13 }}>
+          {user ? "這個帳號沒有管理者權限。" : "請先用右上角「登入 / 註冊」登入你的管理者帳號。"}
+        </p>
       ) : (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
@@ -748,7 +704,7 @@ export default function AdminPanel() {
                 活動與官方情報
               </button>
             </div>
-            <button onClick={handleLogout} style={{ fontSize: 11, background: "none", border: "none", color: "#4ecb5f", cursor: "pointer", fontWeight: 700 }}>
+            <button onClick={signOut} style={{ fontSize: 11, background: "none", border: "none", color: "#4ecb5f", cursor: "pointer", fontWeight: 700 }}>
               ✅ 已登入（點擊登出）
             </button>
           </div>
